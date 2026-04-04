@@ -1,10 +1,10 @@
 /**
- * Phase 2b: Gemini ranks the top search results into candidates
+ * Phase 2b: LLM ranks the top search results into candidates
  *
  * Replaces 2 n8n nodes: Rank candidates + Parse LLM output
  */
 
-import { askGeminiJSON } from "../gemini";
+import { askJSON } from "../llm";
 import type { SearchResult, RankedCandidate } from "../types";
 
 interface RankResponse {
@@ -52,6 +52,6 @@ Return ONLY valid JSON in this exact shape:
 
 No extra keys, comments, or prose. Just valid JSON.`;
 
-  const parsed = await askGeminiJSON<RankResponse>(prompt);
+  const parsed = await askJSON<RankResponse>(prompt);
   return parsed.topCandidates ?? [];
 }

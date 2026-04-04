@@ -5,14 +5,14 @@
  * Key improvement: tries all candidates, not just the first one
  */
 
-import { askGemini } from "../gemini";
+import { ask } from "../llm";
 import type { RankedCandidate, EmailCandidate } from "../types";
 
 /** Ask Gemini for likely email domains used by a company */
 async function guessEmailDomains(company: string): Promise<string[]> {
   const prompt = `Identify the specific email domain(s) used by employees of "${company}". Many companies use shorter abbreviations for emails (e.g., "dharbor.com" instead of "digitalharbor.com"). Return up to 3 likely email domains separated by commas. Return ONLY the domains. No explanation.`;
 
-  const raw = await askGemini(prompt);
+  const raw = await ask(prompt);
 
   const domains = raw
     .split(/[\s,;\n]+/)

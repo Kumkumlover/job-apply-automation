@@ -4,7 +4,7 @@
  * Replaces: "Message a model" node (cleaned up — ONE task only)
  */
 
-import { askGemini } from "../gemini";
+import { ask } from "../llm";
 
 export async function personalizeReason(
   company: string,
@@ -29,7 +29,7 @@ Write exactly ONE sentence explaining why I am excited about this company and ro
 Use "I" voice, be specific to the JD above, and keep it between 20 and 35 words.
 No greeting, no closing, no bullet points, no quotes - return only the sentence.`;
 
-  const raw = await askGemini(prompt);
+  const raw = await ask(prompt);
   // Strip any quotes Gemini might wrap around the sentence
   return raw.replace(/^["']+|["']+$/g, "").trim();
 }
