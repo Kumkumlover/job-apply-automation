@@ -7,7 +7,10 @@ import { findFirstValidEmail, validateEmail } from "./pipeline/validate";
 import { personalizeReason } from "./pipeline/personalize";
 import { composeEmail, sendOutboundEmail } from "./pipeline/send";
 
-export const inngest = new Inngest({ id: "job-apply-automation" });
+export const inngest = new Inngest({
+  id: "job-apply-automation",
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+});
 
 /**
  * The main pipeline function.
