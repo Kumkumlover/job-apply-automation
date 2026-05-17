@@ -3,9 +3,10 @@
  *
  * Combines:
  *   1. Hunter.io / Apollo.io API lookups (capped at 2 per domain)
- *   2. Pattern-based prediction with domain-specific learning
- *   3. DNS-based validation (real, not simulated)
- *   4. Caching and feedback loops
+ *   2. LLM-powered domain guessing and pattern prediction
+ *   3. Pattern-based prediction with domain-specific learning
+ *   4. DNS-based validation (real, not simulated)
+ *   5. Caching and feedback loops
  *
  * Storage uses an in-memory store backed by a JSON file on disk.
  * On Vercel serverless the file won't persist between cold starts,
@@ -14,6 +15,7 @@
 
 import { validateEmail } from "./pipeline/validate";
 import { store, type PatternRecord, type CachedEmail } from "./intelligence-store";
+import { ask, askJSON } from "./llm";
 
 // ─── Public Types ───────────────────────────────────────────────
 
@@ -165,6 +167,77 @@ function getTopPatterns(domain: string, limit: number = 3): PatternRecord[] {
   return merged.slice(0, limit);
 }
 
+// ─── LLM Intelligence Layer ─────────────────────────────────────
+
+/**
+ * Use LLM to guess the email domains a company uses.
+ * Companies often use abbreviations (e.g., "Digital Harbor" → dharbor.com).
+ */
+async function llmGuessDomains(company: string, knownDomain: string): Promise<string[]> {
+  try {
+    const prompt = `You are an email domain expert. Given a company name, predict the email domains their employees likely use.
+
+Company: "${company}"
+Known domain: ${knownDomain}
+
+Many companies use shorter abbreviations for emails (e.g., "Digital Harbor" uses "dharbor.com", "McKinsey & Company" uses "mckinsey.com").
+
+Return a JSON array of up to 3 likely email domains, ordered by probability.
+Include the known domain if it seems correct.
+Return ONLY the JSON array, no explanation. Example: ["dharbor.com", "digitalharbor.com"]`;
+
+    const domains = await askJSON<string[]>(prompt);
+    return domains.filter((d: string) => d.includes(".") && d.length > 3);
+  } catch {
+    return [knownDomain];
+  }
+}
+
+/**
+ * Use LLM to predict the most likely email pattern for a company,
+ * incorporating feedback history from similar companies.
+ */
+async function llmPredictPattern(
+  company: string,
+  domain: string
+): Promise<string | null> {
+  try {
+    // Gather feedback history for context
+    const data = store.load();
+    const allPatterns = data.patterns.filter(p => p.usageCount > 0);
+    const feedbackSummary = allPatterns
+      .map(p => {
+        const rate = p.successCount / Math.max(p.usageCount, 1);
+        const scope = p.domain ? `domain:${p.domain}` : "global";
+        return `${p.pattern} (${scope}, ${Math.round(rate * 100)}% success, ${p.usageCount} uses)`;
+      })
+      .join("\n");
+
+    const prompt = `You are an email pattern prediction engine. Based on historical data, predict the most likely email format for employees at "${company}" (domain: ${domain}).
+
+HISTORICAL PATTERN DATA:
+${feedbackSummary || "No historical data yet."}
+
+Common patterns: {first}.{last}, {first}{last}, {first}, {f}{last}, {first}{l}, {last}.{first}
+
+Based on:
+1. The company name and domain style
+2. Historical success rates from similar domains
+3. Industry conventions
+
+Return ONLY the pattern string (e.g., "{first}.{last}"). No explanation.`;
+
+    const raw = await ask(prompt);
+    const cleaned = raw.trim().replace(/^["']+|["']+$/g, "");
+
+    // Validate it's a known pattern
+    if (DEFAULT_PATTERNS.includes(cleaned)) return cleaned;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── API Layer (Hunter.io + Apollo.io) ──────────────────────────
 
 async function hunterLookup(
@@ -282,38 +355,58 @@ async function processPerson(
     }
   }
 
-  // 3. Pattern-based prediction with DNS validation
-  const topPatterns = getTopPatterns(domain, 3);
+  // 3. LLM Deep Search — guess alternate domains & predict best pattern
+  const allDomains = await llmGuessDomains(person.company, domain);
+  const llmPattern = await llmPredictPattern(person.company, domain);
+
+  // 4. Pattern-based prediction with DNS validation
+  const topPatterns = getTopPatterns(domain, 4);
   const seenEmails = new Set<string>();
 
-  for (const pat of topPatterns) {
-    const predicted = generateFromPattern(first, last, pat.pattern, domain);
-    if (!predicted || seenEmails.has(predicted)) continue;
-    seenEmails.add(predicted);
+  // If LLM predicted a specific pattern, try it first
+  if (llmPattern && !topPatterns.some(p => p.pattern === llmPattern)) {
+    topPatterns.unshift({
+      pattern: llmPattern,
+      domain,
+      successCount: 1,
+      usageCount: 1,
+    });
+  }
 
-    // Real DNS validation instead of random simulation
-    const validation = await validateEmail(predicted);
+  // Try all domains (original + LLM-guessed) × all patterns
+  for (const tryDomain of allDomains) {
+    for (const pat of topPatterns) {
+      const predicted = generateFromPattern(first, last, pat.pattern, tryDomain);
+      if (!predicted || seenEmails.has(predicted)) continue;
+      seenEmails.add(predicted);
 
-    if (validation.mx_ok && validation.domain_ok && !validation.disposable) {
-      const baseRate = Math.max(
-        pat.successCount / Math.max(pat.usageCount, 1),
-        0.3
-      );
-      // Use real recruiting_score as the validation modifier
-      const validationModifier = Math.max(validation.recruiting_score, 0.5);
-      const finalConfidence = Math.round(baseRate * validationModifier * 0.8 * 100) / 100;
+      // Real DNS validation
+      const validation = await validateEmail(predicted);
 
-      results.push({
-        email: predicted,
-        type: "predicted",
-        confidence: finalConfidence,
-        source: "Pattern Engine",
-      });
+      if (validation.mx_ok && validation.domain_ok && !validation.disposable) {
+        const baseRate = Math.max(
+          pat.successCount / Math.max(pat.usageCount, 1),
+          0.3
+        );
+        const validationModifier = Math.max(validation.recruiting_score, 0.5);
+        // Boost confidence slightly if LLM suggested this domain/pattern
+        const llmBoost = (tryDomain !== domain || pat.pattern === llmPattern) ? 1.1 : 1.0;
+        const finalConfidence = Math.min(0.95, Math.round(baseRate * validationModifier * 0.8 * llmBoost * 100) / 100);
 
-      store.saveEmail(predicted, person.name, domain, pat.pattern, finalConfidence, "Pattern Engine", false);
+        const source = tryDomain !== domain ? "LLM Deep Search" : "Pattern Engine";
+        results.push({
+          email: predicted,
+          type: "predicted",
+          confidence: finalConfidence,
+          source,
+        });
+
+        store.saveEmail(predicted, person.name, tryDomain, pat.pattern, finalConfidence, source, false);
+      }
+
+      if (results.length >= 5) break;
     }
-
-    if (results.length >= 3) break;
+    if (results.length >= 5) break;
   }
 
   return formatOutput(person, results);
