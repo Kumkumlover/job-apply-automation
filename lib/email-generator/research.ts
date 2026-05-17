@@ -229,7 +229,22 @@ export async function executeResearch(
     throw new Error("LLM returned an empty payload.");
   }
 
-  // 4. Parse and return
-  const data = JSON.parse(rawText) as ResearchResult;
-  return data;
+  // 4. Strip markdown code fences if present (Groq fallback wraps in ```json ... ```)
+  const cleanedText = rawText
+    .replace(/^```(?:json)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+
+  // 5. Parse and return
+  try {
+    const data = JSON.parse(cleanedText) as ResearchResult;
+    return data;
+  } catch (parseErr) {
+    // Try to extract JSON from the response if it's mixed with text
+    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]) as ResearchResult;
+    }
+    throw new Error(`Failed to parse LLM response as JSON: ${cleanedText.slice(0, 200)}`);
+  }
 }
