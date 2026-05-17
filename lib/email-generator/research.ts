@@ -92,8 +92,10 @@ async function callGemini(
     };
   }
 
-  // Retry with exponential backoff
-  const delays = [1000, 2000, 4000, 8000];
+  // Retry with longer backoff for 429 rate limits
+  const delays = [2000, 5000, 10000, 20000, 30000];
+  let lastStatus = 0;
+
   for (let i = 0; i <= delays.length; i++) {
     try {
       const res = await fetch(url, {
@@ -102,24 +104,46 @@ async function callGemini(
         body: JSON.stringify(body),
       });
 
+      lastStatus = res.status;
+
       if (res.ok) {
         const data = await res.json();
         return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       }
 
-      if (i === delays.length) {
-        throw new Error(`Gemini API error: ${res.status}`);
+      // For non-retryable errors, fail immediately
+      if (res.status !== 429 && res.status !== 503 && res.status !== 500) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(`Gemini API error ${res.status}: ${errBody.slice(0, 200)}`);
       }
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Gemini API error")) throw err;
       if (i === delays.length) throw err;
     }
 
     if (i < delays.length) {
+      console.log(`[Gemini] Rate limited (${lastStatus}), retrying in ${delays[i] / 1000}s...`);
       await new Promise((r) => setTimeout(r, delays[i]));
     }
   }
 
-  throw new Error("Failed to reach Gemini API after retries.");
+  // If Gemini is completely rate-limited, try Groq as fallback (without Gemini-specific features)
+  if (lastStatus === 429) {
+    console.log("[Gemini] Exhausted retries, falling back to Groq...");
+    try {
+      const { ask } = await import("../llm");
+      const appendix = useSchema
+        ? "\n\nYou MUST return valid JSON matching this structure: { problems: [{ id, title, problem, hypothesis, pmGoal, hook, citation, companyMission, matchedStrengths, linkedinHook, speculativePitch }] }. Return ONLY the JSON, no markdown."
+        : "";
+      return await ask(prompt + appendix);
+    } catch (fallbackErr) {
+      throw new Error(
+        "Gemini API rate-limited (429) and Groq fallback also failed. Please wait a minute and try again."
+      );
+    }
+  }
+
+  throw new Error(`Gemini API failed after ${delays.length} retries (last status: ${lastStatus}).`);
 }
 
 // ─── Research Prompt Builder ────────────────────────────────────
