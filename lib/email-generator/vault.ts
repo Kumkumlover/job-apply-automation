@@ -1,90 +1,80 @@
 /**
  * Email Generator — Vault Store
  *
- * Replaces Firebase/Firestore with a JSON-backed in-memory store.
- * Stores "evidence" (your past work/achievements) and "inspiration"
- * (industry best practices/theories) that feed the RAG pipeline.
+ * Replaces the JSON-backed store with Prisma + Supabase.
+ * Links all items to the current user (fetched dynamically).
  */
 
-import { promises as fs } from "fs";
-import path from "path";
 import type { VaultItem } from "./types";
-
-interface VaultData {
-  items: VaultItem[];
-}
-
-const VAULT_FILE = path.join(process.cwd(), "data", "vault-store.json");
-let _cache: VaultData | null = null;
-
-async function ensureDir() {
-  await fs.mkdir(path.dirname(VAULT_FILE), { recursive: true });
-}
-
-function createEmpty(): VaultData {
-  return { items: [] };
-}
+import { prisma, getDefaultUserId } from "../db";
 
 class VaultStore {
-  load(): VaultData {
-    if (_cache) return _cache;
-    try {
-      const raw = require("fs").readFileSync(VAULT_FILE, "utf-8");
-      _cache = JSON.parse(raw) as VaultData;
-    } catch {
-      _cache = createEmpty();
-    }
-    return _cache;
+  async getAll(): Promise<VaultItem[]> {
+    const userId = await getDefaultUserId();
+    const items = await prisma.vaultItem.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return items.map(this.mapItem);
   }
 
-  async save(): Promise<void> {
-    if (!_cache) return;
-    try {
-      await ensureDir();
-      await fs.writeFile(VAULT_FILE, JSON.stringify(_cache, null, 2));
-    } catch {
-      // Silently fail on read-only filesystems (Vercel prod)
-    }
+  async getByType(vaultType: "evidence" | "inspiration"): Promise<VaultItem[]> {
+    const userId = await getDefaultUserId();
+    const items = await prisma.vaultItem.findMany({
+      where: { userId, vaultType },
+      orderBy: { createdAt: 'desc' },
+    });
+    return items.map(this.mapItem);
   }
 
-  getAll(): VaultItem[] {
-    return this.load().items;
-  }
-
-  getByType(vaultType: "evidence" | "inspiration"): VaultItem[] {
-    return this.load()
-      .items.filter((i) => i.vaultType === vaultType)
-      .sort((a, b) => b.timestamp - a.timestamp);
-  }
-
-  getTopByRecency(
+  async getTopByRecency(
     vaultType: "evidence" | "inspiration",
     limit: number = 3
-  ): VaultItem[] {
-    return this.getByType(vaultType).slice(0, limit);
+  ): Promise<VaultItem[]> {
+    const userId = await getDefaultUserId();
+    const items = await prisma.vaultItem.findMany({
+      where: { userId, vaultType },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return items.map(this.mapItem);
   }
 
-  add(item: Omit<VaultItem, "id" | "timestamp">): VaultItem {
-    const data = this.load();
-    const newItem: VaultItem = {
-      ...item,
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-    };
-    data.items.push(newItem);
-    void this.save();
-    return newItem;
+  async add(item: Omit<VaultItem, "id" | "timestamp">): Promise<VaultItem> {
+    const userId = await getDefaultUserId();
+    const created = await prisma.vaultItem.create({
+      data: {
+        userId,
+        type: item.type,
+        vaultType: item.vaultType,
+        title: item.title,
+        content: item.content,
+      },
+    });
+    return this.mapItem(created);
   }
 
-  remove(id: string): boolean {
-    const data = this.load();
-    const before = data.items.length;
-    data.items = data.items.filter((i) => i.id !== id);
-    if (data.items.length < before) {
-      void this.save();
+  async remove(id: string): Promise<boolean> {
+    const userId = await getDefaultUserId();
+    try {
+      await prisma.vaultItem.delete({
+        where: { id, userId },
+      });
       return true;
+    } catch {
+      return false;
     }
-    return false;
+  }
+
+  private mapItem(dbItem: any): VaultItem {
+    return {
+      id: dbItem.id,
+      type: dbItem.type as "text" | "link" | "image" | "pdf",
+      vaultType: dbItem.vaultType as "evidence" | "inspiration",
+      title: dbItem.title,
+      content: dbItem.content,
+      timestamp: dbItem.createdAt.getTime(),
+    };
   }
 }
 

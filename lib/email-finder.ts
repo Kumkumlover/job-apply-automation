@@ -118,13 +118,19 @@ function generateFromPattern(
   return local ? `${local}@${domain}` : null;
 }
 
-/** Get the best patterns for a domain, ranked by success rate */
-function getTopPatterns(domain: string, limit: number = 3): PatternRecord[] {
-  const data = store.load();
+import { prisma, getDefaultUserId } from "./db";
 
-  // Collect domain-specific and global patterns
-  const domainPatterns = data.patterns.filter((p) => p.domain === domain);
-  const globalPatterns = data.patterns.filter((p) => p.domain === null);
+/** Get the best patterns for a domain, ranked by success rate */
+async function getTopPatterns(domain: string, limit: number = 3): Promise<PatternRecord[]> {
+  const userId = await getDefaultUserId();
+
+  // Collect domain-specific and global patterns from DB
+  const domainPatterns = await prisma.patternRecord.findMany({
+    where: { userId, domain }
+  });
+  const globalPatterns = await prisma.patternRecord.findMany({
+    where: { userId, domain: null }
+  });
 
   // Merge: domain-specific patterns take priority
   const merged: PatternRecord[] = [];
@@ -138,7 +144,7 @@ function getTopPatterns(domain: string, limit: number = 3): PatternRecord[] {
   )) {
     if (!seen.has(p.pattern)) {
       seen.add(p.pattern);
-      merged.push(p);
+      merged.push({ pattern: p.pattern, domain: p.domain, successCount: p.successCount, usageCount: p.usageCount });
     }
   }
 
@@ -150,7 +156,7 @@ function getTopPatterns(domain: string, limit: number = 3): PatternRecord[] {
   )) {
     if (!seen.has(p.pattern)) {
       seen.add(p.pattern);
-      merged.push(p);
+      merged.push({ pattern: p.pattern, domain: p.domain, successCount: p.successCount, usageCount: p.usageCount });
     }
   }
 
@@ -202,9 +208,11 @@ async function llmPredictPattern(
   domain: string
 ): Promise<string | null> {
   try {
+    const userId = await getDefaultUserId();
     // Gather feedback history for context
-    const data = store.load();
-    const allPatterns = data.patterns.filter(p => p.usageCount > 0);
+    const allPatterns = await prisma.patternRecord.findMany({
+      where: { userId, usageCount: { gt: 0 } }
+    });
     const feedbackSummary = allPatterns
       .map(p => {
         const rate = p.successCount / Math.max(p.usageCount, 1);
@@ -310,7 +318,7 @@ async function processPerson(
   const domain = person.domain.toLowerCase().trim();
 
   // 1. Check cache first
-  const cached = store.getCachedEmails(person.name, domain);
+  const cached = await store.getCachedEmails(person.name, domain);
   if (cached.length > 0) {
     return formatOutput(person, cached.map((c) => ({
       email: c.email,
@@ -331,8 +339,8 @@ async function processPerson(
     if (hunterResult) {
       store.incrementApiCall(domain);
       const pattern = extractPattern(first, last, hunterResult.email.split("@")[0]);
-      store.saveEmail(hunterResult.email, person.name, domain, pattern, 0.95, hunterResult.source, true);
-      store.recordPatternSuccess(pattern, domain);
+      await store.saveEmail(hunterResult.email, person.name, domain, pattern, 0.95, hunterResult.source, true);
+      await store.recordPatternSuccess(pattern, domain);
 
       return formatOutput(person, [
         { email: hunterResult.email, type: "verified", confidence: 0.95, source: hunterResult.source },
@@ -345,8 +353,8 @@ async function processPerson(
       if (apolloResult) {
         store.incrementApiCall(domain);
         const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
-        store.saveEmail(apolloResult.email, person.name, domain, pattern, 0.85, apolloResult.source, false);
-        store.recordPatternSuccess(pattern, domain);
+        await store.saveEmail(apolloResult.email, person.name, domain, pattern, 0.85, apolloResult.source, false);
+        await store.recordPatternSuccess(pattern, domain);
 
         return formatOutput(person, [
           { email: apolloResult.email, type: "discovered", confidence: 0.85, source: apolloResult.source },
@@ -360,7 +368,7 @@ async function processPerson(
   const llmPattern = await llmPredictPattern(person.company, domain);
 
   // 4. Pattern-based prediction with DNS validation
-  const topPatterns = getTopPatterns(domain, 4);
+  const topPatterns = await getTopPatterns(domain, 4);
   const seenEmails = new Set<string>();
 
   // If LLM predicted a specific pattern, try it first
@@ -401,7 +409,7 @@ async function processPerson(
           source,
         });
 
-        store.saveEmail(predicted, person.name, tryDomain, pat.pattern, finalConfidence, source, false);
+        await store.saveEmail(predicted, person.name, tryDomain, pat.pattern, finalConfidence, source, false);
       }
 
       if (results.length >= 5) break;

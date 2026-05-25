@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { vaultStore } from "@/lib/email-generator/vault";
 import { ingestUrl } from "@/lib/email-generator/research";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const vaultType = req.nextUrl.searchParams.get("type") as
     | "evidence"
@@ -18,8 +20,8 @@ export async function GET(req: NextRequest) {
     | null;
 
   const items = vaultType
-    ? vaultStore.getByType(vaultType)
-    : vaultStore.getAll();
+    ? await vaultStore.getByType(vaultType)
+    : await vaultStore.getAll();
 
   return NextResponse.json({ items, count: items.length });
 }
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const item = vaultStore.add({
+    const item = await vaultStore.add({
       title: title || "Untitled",
       content: finalContent,
       type: finalType,
@@ -88,7 +90,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    const removed = vaultStore.remove(id);
+    const removed = await vaultStore.remove(id);
     return NextResponse.json({ success: removed });
   } catch (err) {
     console.error("vault DELETE error:", err);

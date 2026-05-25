@@ -205,8 +205,10 @@ export async function executeResearch(
   apiKey: string
 ): Promise<ResearchResult> {
   // 1. Retrieve top vault items (recency-based)
-  const topEvidence = vaultStore.getTopByRecency("evidence", 3);
-  const topInspiration = vaultStore.getTopByRecency("inspiration", 2);
+  const [topEvidence, topInspiration] = await Promise.all([
+    vaultStore.getTopByRecency("evidence", 3),
+    vaultStore.getTopByRecency("inspiration", 2)
+  ]);
 
   // 2. Scrape target contexts
   const [leadContext, companyContext] = await Promise.all([

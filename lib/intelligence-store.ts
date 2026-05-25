@@ -1,20 +1,12 @@
 /**
- * Intelligence Store — TypeScript port of the Python DatabaseService.
+ * Intelligence Store
  *
- * Replaces SQLite with a JSON file + in-memory cache.
- * Tables ported:
- *   - companies   → tracks API calls used per domain (max 2)
- *   - patterns    → tracks pattern success/failure rates (domain + global)
- *   - emails      → caches discovered/predicted emails
- *   - feedback    → logs user feedback
- *
- * On Vercel serverless the JSON file won't persist between cold starts,
- * but the in-memory cache survives within a warm function invocation.
- * This can be upgraded to Supabase later for full persistence.
+ * Replaces the JSON file with Prisma + Supabase.
+ * Tracks API limits (in memory for now, or using a simple Map),
+ * and persists Patterns, Emails, and Feedback to the database.
  */
 
-import { promises as fs } from "fs";
-import path from "path";
+import { prisma, getDefaultUserId } from "./db";
 
 // ─── Data Types ─────────────────────────────────────────────────
 
@@ -41,113 +33,47 @@ export interface FeedbackRecord {
   timestamp: string;
 }
 
-export interface CompanyRecord {
-  domain: string;
-  apiCallsUsed: number;
-}
-
-interface StoreData {
-  companies: CompanyRecord[];
-  patterns: PatternRecord[];
-  emails: CachedEmail[];
-  feedback: FeedbackRecord[];
-}
-
-// ─── Default Seed Data ──────────────────────────────────────────
-
-const DEFAULT_PATTERNS: PatternRecord[] = [
-  { pattern: "{first}.{last}", domain: null, successCount: 1, usageCount: 2 },
-  { pattern: "{first}{last}", domain: null, successCount: 1, usageCount: 2 },
-  { pattern: "{first}", domain: null, successCount: 1, usageCount: 2 },
-  { pattern: "{f}{last}", domain: null, successCount: 1, usageCount: 2 },
-  { pattern: "{first}{l}", domain: null, successCount: 1, usageCount: 2 },
-  { pattern: "{last}.{first}", domain: null, successCount: 1, usageCount: 2 },
-];
-
-function createEmptyStore(): StoreData {
-  return {
-    companies: [],
-    patterns: [...DEFAULT_PATTERNS],
-    emails: [],
-    feedback: [],
-  };
-}
-
-// ─── Store Implementation ───────────────────────────────────────
-
-const STORE_FILE = path.join(process.cwd(), "data", "intelligence-store.json");
-
-let _cache: StoreData | null = null;
-
-async function ensureDir() {
-  const dir = path.dirname(STORE_FILE);
-  await fs.mkdir(dir, { recursive: true });
-}
+// Memory cache for companies API limits (to avoid unnecessary DB writes for ratelimits)
+const companyApiLimits = new Map<string, number>();
 
 class IntelligenceStore {
-  /** Load the store from disk (or create fresh) */
-  load(): StoreData {
-    if (_cache) return _cache;
 
-    // Try synchronous load for speed (initial cold start)
-    try {
-      const raw = require("fs").readFileSync(STORE_FILE, "utf-8");
-      _cache = JSON.parse(raw) as StoreData;
-    } catch {
-      _cache = createEmptyStore();
-    }
-
-    return _cache;
-  }
-
-  /** Persist the store to disk (best-effort, fails silently on Vercel) */
-  async save(): Promise<void> {
-    if (!_cache) return;
-    try {
-      await ensureDir();
-      await fs.writeFile(STORE_FILE, JSON.stringify(_cache, null, 2));
-    } catch {
-      // Silently fail on read-only filesystems (Vercel prod)
-    }
-  }
-
-  // ── Companies ──
+  // ── Companies (In-Memory for Rate Limits) ──
 
   getApiCalls(domain: string): number {
-    const data = this.load();
-    const company = data.companies.find(
-      (c) => c.domain.toLowerCase() === domain.toLowerCase()
-    );
-    return company?.apiCallsUsed ?? 0;
+    return companyApiLimits.get(domain.toLowerCase()) || 0;
   }
 
   incrementApiCall(domain: string): void {
-    const data = this.load();
-    const existing = data.companies.find(
-      (c) => c.domain.toLowerCase() === domain.toLowerCase()
-    );
-    if (existing) {
-      existing.apiCallsUsed += 1;
-    } else {
-      data.companies.push({ domain: domain.toLowerCase(), apiCallsUsed: 1 });
-    }
-    void this.save();
+    const key = domain.toLowerCase();
+    companyApiLimits.set(key, (companyApiLimits.get(key) || 0) + 1);
   }
 
   // ── Emails ──
 
-  getCachedEmails(name: string, domain: string): CachedEmail[] {
-    const data = this.load();
-    return data.emails
-      .filter(
-        (e) =>
-          e.name.toLowerCase() === name.toLowerCase() &&
-          e.domain.toLowerCase() === domain.toLowerCase()
-      )
-      .sort((a, b) => b.confidence - a.confidence);
+  async getCachedEmails(name: string, domain: string): Promise<CachedEmail[]> {
+    const userId = await getDefaultUserId();
+    const emails = await prisma.cachedEmail.findMany({
+      where: {
+        userId,
+        name: name.toLowerCase(),
+        domain: domain.toLowerCase(),
+      },
+      orderBy: { confidence: 'desc' }
+    });
+
+    return emails.map(e => ({
+      email: e.email,
+      name: e.name,
+      domain: e.domain,
+      pattern: e.pattern,
+      confidence: e.confidence,
+      source: e.source,
+      verified: e.verified,
+    }));
   }
 
-  saveEmail(
+  async saveEmail(
     email: string,
     name: string,
     domain: string,
@@ -155,120 +81,161 @@ class IntelligenceStore {
     confidence: number,
     source: string,
     verified: boolean
-  ): void {
-    const data = this.load();
+  ): Promise<void> {
+    const userId = await getDefaultUserId();
 
-    // Upsert by email
-    const idx = data.emails.findIndex(
-      (e) => e.email.toLowerCase() === email.toLowerCase()
-    );
-    const record: CachedEmail = {
-      email,
-      name,
-      domain: domain.toLowerCase(),
-      pattern,
-      confidence,
-      source,
-      verified,
-    };
-
-    if (idx >= 0) {
-      data.emails[idx] = record;
-    } else {
-      data.emails.push(record);
-    }
-
-    void this.save();
+    await prisma.cachedEmail.upsert({
+      where: {
+        userId_name_domain: {
+          userId,
+          name: name.toLowerCase(),
+          domain: domain.toLowerCase(),
+        }
+      },
+      update: {
+        email,
+        pattern,
+        confidence,
+        source,
+        verified,
+      },
+      create: {
+        userId,
+        email,
+        name: name.toLowerCase(),
+        domain: domain.toLowerCase(),
+        pattern,
+        confidence,
+        source,
+        verified,
+      }
+    });
   }
 
   // ── Patterns ──
 
-  recordPatternSuccess(pattern: string, domain: string): void {
-    const data = this.load();
+  async recordPatternSuccess(pattern: string, domain: string): Promise<void> {
+    const userId = await getDefaultUserId();
 
     // Update domain-specific pattern
-    const domainPat = data.patterns.find(
-      (p) => p.pattern === pattern && p.domain === domain
-    );
-    if (domainPat) {
-      domainPat.successCount += 1;
-      domainPat.usageCount += 1;
-    } else {
-      data.patterns.push({
-        pattern,
-        domain,
-        successCount: 1,
-        usageCount: 1,
-      });
-    }
-
-    // Also update global pattern
-    const globalPat = data.patterns.find(
-      (p) => p.pattern === pattern && p.domain === null
-    );
-    if (globalPat) {
-      globalPat.successCount += 1;
-      globalPat.usageCount += 1;
-    }
-
-    void this.save();
+    await this.upsertPattern(userId, pattern, domain, 1, 1);
+    
+    // Update global pattern
+    await this.upsertPattern(userId, pattern, "global", 1, 1);
   }
 
-  recordPatternUsage(pattern: string, domain: string): void {
-    const data = this.load();
+  async recordPatternUsage(pattern: string, domain: string): Promise<void> {
+    const userId = await getDefaultUserId();
 
-    const domainPat = data.patterns.find(
-      (p) => p.pattern === pattern && p.domain === domain
-    );
-    if (domainPat) {
-      domainPat.usageCount += 1;
+    // Update domain-specific pattern
+    await this.upsertPattern(userId, pattern, domain, 0, 1);
+    
+    // Update global pattern
+    await this.upsertPattern(userId, pattern, "global", 0, 1);
+  }
+
+  private async upsertPattern(userId: string, pattern: string, domain: string, successInc: number, usageInc: number) {
+    // We use "global" as a string for the domain field if it's null in logic, since unique constraints with null can be tricky.
+    // Wait, the schema says domain String? (nullable). Let's use Prisma's upsert.
+    
+    const dbDomain = domain === "global" ? null : domain;
+
+    // Prisma doesn't support upsert with nullable unique constraints perfectly in all DBs,
+    // so we'll do a find and update/create.
+    const existing = await prisma.patternRecord.findFirst({
+      where: { userId, pattern, domain: dbDomain }
+    });
+
+    if (existing) {
+      await prisma.patternRecord.update({
+        where: { id: existing.id },
+        data: {
+          successCount: { increment: successInc },
+          usageCount: { increment: usageInc }
+        }
+      });
+    } else {
+      await prisma.patternRecord.create({
+        data: {
+          userId,
+          pattern,
+          domain: dbDomain,
+          successCount: successInc,
+          usageCount: usageInc,
+        }
+      });
     }
-
-    const globalPat = data.patterns.find(
-      (p) => p.pattern === pattern && p.domain === null
-    );
-    if (globalPat) {
-      globalPat.usageCount += 1;
-    }
-
-    void this.save();
   }
 
   // ── Feedback ──
 
-  logFeedback(email: string, status: "correct" | "incorrect"): void {
-    const data = this.load();
+  async logFeedback(email: string, status: "correct" | "incorrect"): Promise<void> {
+    const userId = await getDefaultUserId();
 
-    // Log the feedback
-    data.feedback.push({
-      email,
-      status,
-      timestamp: new Date().toISOString(),
+    await prisma.feedbackEntry.create({
+      data: {
+        userId,
+        email,
+        status,
+      }
     });
 
-    // Find the email record to update patterns
-    const emailRecord = data.emails.find(
-      (e) => e.email.toLowerCase() === email.toLowerCase()
-    );
+    const emailRecord = await prisma.cachedEmail.findFirst({
+      where: { userId, email: email.toLowerCase() }
+    });
 
     if (emailRecord) {
       const { pattern, domain } = emailRecord;
 
       if (status === "correct") {
-        // Boost: update pattern success counts
-        this.recordPatternSuccess(pattern, domain);
-        // Mark email as verified with max confidence
-        emailRecord.verified = true;
-        emailRecord.confidence = 1.0;
+        await this.recordPatternSuccess(pattern, domain);
+        await prisma.cachedEmail.update({
+          where: { id: emailRecord.id },
+          data: { verified: true, confidence: 1.0 }
+        });
       } else {
-        // Penalize: increment usage but not success
-        this.recordPatternUsage(pattern, domain);
-        // Halve the email's confidence
-        emailRecord.confidence *= 0.5;
+        await this.recordPatternUsage(pattern, domain);
+        await prisma.cachedEmail.update({
+          where: { id: emailRecord.id },
+          data: { confidence: emailRecord.confidence * 0.5 }
+        });
       }
     }
-
-    void this.save();
+  }
+  
+  // ── Stats ──
+  async getStoreStats() {
+      const userId = await getDefaultUserId();
+      const [patterns, emails, feedback] = await Promise.all([
+          prisma.patternRecord.count({ where: { userId } }),
+          prisma.cachedEmail.count({ where: { userId } }),
+          prisma.feedbackEntry.count({ where: { userId } })
+      ]);
+      
+      return {
+          patterns,
+          cachedEmails: emails,
+          feedbackEntries: feedback,
+          companiesTracked: companyApiLimits.size, // In-memory
+      };
+  }
+  
+  async getTopPatterns() {
+      const userId = await getDefaultUserId();
+      return prisma.patternRecord.findMany({
+          where: { userId, domain: null },
+          orderBy: { successCount: 'desc' },
+          take: 10
+      });
+  }
+  
+  async getRecentFeedback() {
+      const userId = await getDefaultUserId();
+      return prisma.feedbackEntry.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 5
+      });
   }
 }
 

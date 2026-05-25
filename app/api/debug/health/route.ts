@@ -9,6 +9,8 @@ import { NextResponse } from "next/server";
 import { store } from "@/lib/intelligence-store";
 import { vaultStore } from "@/lib/email-generator/vault";
 
+export const dynamic = 'force-dynamic';
+
 interface HealthCheck {
   name: string;
   status: "ok" | "error" | "missing";
@@ -106,17 +108,17 @@ export async function GET() {
   ]);
 
   // Store stats
-  const storeData = store.load();
-  const vaultData = vaultStore.getAll();
-
-  const storeStats = {
-    patterns: storeData.patterns.length,
-    cachedEmails: storeData.emails.length,
-    feedbackEntries: storeData.feedback.length,
-    companiesTracked: storeData.companies.length,
+  const [storeStats, vaultData, recentFeedback, topPatternsRaw] = await Promise.all([
+    store.getStoreStats(),
+    vaultStore.getAll(),
+    store.getRecentFeedback(),
+    store.getTopPatterns(),
+  ]);
+  const fullStoreStats = {
+    ...storeStats,
     vaultItems: vaultData.length,
-    vaultEvidence: vaultData.filter(v => v.vaultType === "evidence").length,
-    vaultInspiration: vaultData.filter(v => v.vaultType === "inspiration").length,
+    vaultEvidence: vaultData.filter((v: any) => v.vaultType === "evidence").length,
+    vaultInspiration: vaultData.filter((v: any) => v.vaultType === "inspiration").length,
   };
 
   const checks: HealthCheck[] = [groq, gemini, jina, smtp, envGroq, envGemini, envCse, envSmtp, envLlm];
@@ -126,13 +128,11 @@ export async function GET() {
     status: allOk ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     checks,
-    storeStats,
-    recentFeedback: storeData.feedback.slice(-10).reverse(),
-    topPatterns: storeData.patterns
-      .filter(p => p.usageCount > 0)
-      .sort((a, b) => (b.successCount / Math.max(b.usageCount, 1)) - (a.successCount / Math.max(a.usageCount, 1)))
-      .slice(0, 10)
-      .map(p => ({
+    storeStats: fullStoreStats,
+    recentFeedback: recentFeedback,
+    topPatterns: topPatternsRaw
+      .filter((p: any) => p.usageCount > 0)
+      .map((p: any) => ({
         pattern: p.pattern,
         domain: p.domain ?? "global",
         successRate: `${Math.round((p.successCount / Math.max(p.usageCount, 1)) * 100)}%`,

@@ -1,0 +1,292 @@
+datasource db {
+  provider  = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ── NextAuth Models ─────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token                  String? @db.Text
+  session_state             String?
+  refresh_token_expires_in  Int?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id               String            @id @default(cuid())
+  name             String?
+  email            String?           @unique
+  emailVerified    DateTime?
+  image            String?
+  apiKey           String?           @unique @default(cuid())
+  accounts         Account[]
+  sessions         Session[]
+  applications     Application[]
+  customProperties CustomProperty[]
+  customStages     CustomStage[]
+  gmailSyncState       GmailSyncState?
+  linkedGmailAccounts  LinkedGmailAccount[]
+  profileContext       ProfileContext?
+  emailGuessHistories  EmailGuessHistory[]
+  outreachCampaigns    OutreachCampaign[]
+
+  vaultItems           VaultItem[]
+  patternRecords       PatternRecord[]
+  cachedEmails         CachedEmail[]
+  feedbackEntries      FeedbackEntry[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── Core Domain ─────────────────────────────────────────────────
+
+model Application {
+  id             String        @id @default(cuid())
+  userId         String
+  company        String
+  role           String
+  platform       String        @default("manual")
+  status         String        @default("applied")
+  dateApplied    DateTime      @default(now())
+  followUpDate   DateTime?
+  jobUrl         String?
+  salaryMin      Int?
+  salaryMax      String?
+  salaryCurrency String?       @default("INR")
+  location       String?
+  locationType   String?
+  notes          String?       @db.Text
+  linkedinDmSent Boolean       @default(false)
+  emailThreadId  String?
+  jobDescription String?       @db.Text
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  touchpoints  Touchpoint[]
+  customValues CustomValue[]
+
+  @@unique([userId, company, role])
+  @@index([userId, status])
+  @@index([userId, dateApplied])
+  @@index([userId, followUpDate])
+}
+
+model Touchpoint {
+  id             String      @id @default(cuid())
+  applicationId  String
+  type           String
+  source         String
+  date           DateTime    @default(now())
+  notes          String?     @db.Text
+  emailMessageId String?
+  metadata       Json?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model CustomProperty {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String
+  slug      String
+  type      String        @default("text")
+  options   Json?
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  values CustomValue[]
+
+  @@unique([userId, slug])
+}
+
+model CustomValue {
+  id               String         @id @default(cuid())
+  applicationId    String
+  customPropertyId String
+  value            String         @db.Text
+
+  application    Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  customProperty CustomProperty @relation(fields: [customPropertyId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, customPropertyId])
+}
+
+model CustomStage {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  slug      String
+  color     String   @default("#6b7280")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, slug])
+}
+
+model GmailSyncState {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  lastSyncedAt  DateTime?
+  lastHistoryId String?
+  backfillDone  Boolean   @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LinkedGmailAccount {
+  id           String    @id @default(cuid())
+  userId       String
+  email        String
+  accessToken  String    @db.Text
+  refreshToken String?   @db.Text
+  expiresAt    Int?
+  lastSyncedAt DateTime?
+  backfillDone Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+}
+
+// ── Outreach Tool Models ─────────────────────────────────────────
+
+model ProfileContext {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  resume     String?  @db.Text
+  skills     String?  @db.Text
+  background String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmailGuessHistory {
+  id         String   @id @default(cuid())
+  userId     String
+  company    String
+  domain     String
+  pattern    String   // e.g. "{first}.{last}@{domain}"
+  isSuccess  Boolean  @default(false)
+  bounced    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([company])
+  @@index([domain])
+}
+
+model OutreachCampaign {
+  id            String   @id @default(cuid())
+  userId        String
+  company       String
+  role          String
+  hiringManager String?
+  emails        Json     // List of emails sent to
+  subject       String
+  body          String   @db.Text
+  status        String   @default("draft") // draft, sent, bounced, replied
+  sentAt        DateTime?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ── Evidence Vault Models ────────────────────────────────────────
+
+model VaultItem {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // "text" or "url"
+  vaultType String   // "evidence" or "inspiration"
+  title     String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, vaultType])
+}
+
+// ── Intelligence Store Models ────────────────────────────────────
+
+model PatternRecord {
+  id           String   @id @default(cuid())
+  userId       String
+  pattern      String
+  domain       String?  // null means global
+  successCount Int      @default(0)
+  usageCount   Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pattern, domain])
+}
+
+model CachedEmail {
+  id         String   @id @default(cuid())
+  userId     String
+  email      String
+  name       String
+  domain     String
+  pattern    String
+  confidence Float
+  source     String
+  verified   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name, domain])
+}
+
+model FeedbackEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  status    String   // "correct" or "incorrect"
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

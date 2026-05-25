@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    store.logFeedback(email, status);
+    await store.logFeedback(email, status);
 
     return NextResponse.json({
       status: "success",
