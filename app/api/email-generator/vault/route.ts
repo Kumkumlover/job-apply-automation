@@ -12,6 +12,7 @@ import { vaultStore } from "@/lib/email-generator/vault";
 import { ingestUrl } from "@/lib/email-generator/research";
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   const vaultType = req.nextUrl.searchParams.get("type") as

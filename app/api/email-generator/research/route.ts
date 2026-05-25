@@ -12,6 +12,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { executeResearch } from "@/lib/email-generator/research";
 import type { ResearchInput } from "@/lib/email-generator/types";
 
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ResearchInput & { geminiApiKey?: string };

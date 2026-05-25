@@ -1,19 +1,18 @@
 import { PrismaClient } from "@prisma/client";
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient | undefined };
+const prismaClientSingleton = () => {
+  return new PrismaClient({ log: ["query"] })
+}
 
-// Export a proxy so we don't instantiate PrismaClient at module load time
-// This prevents build-time execution errors when Next.js collects page data
-export const prisma = new Proxy({} as PrismaClient, {
-  get(target, prop) {
-    if (!globalForPrisma.prisma) {
-      globalForPrisma.prisma = new PrismaClient({ log: ["query"] });
-    }
-    return (globalForPrisma.prisma as any)[prop];
-  }
-});
+type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = globalForPrisma.prisma;
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClientSingleton | undefined
+}
+
+export const prisma = globalForPrisma.prisma ?? prismaClientSingleton()
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 
 /**
  * Fetch the User ID for the default Gmail account
