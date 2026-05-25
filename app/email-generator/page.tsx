@@ -16,6 +16,14 @@ export default function EmailGeneratorPage() {
   const [jobDescription, setJobDescription] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
 
+  useEffect(() => {
+    const saved = localStorage.getItem("geminiKey");
+    if (saved) setGeminiKey(saved);
+  }, []);
+
+  useEffect(() => {
+    if (geminiKey) localStorage.setItem("geminiKey", geminiKey);
+  }, [geminiKey]);
   const [selectedProblem, setSelectedProblem] = useState<ResearchProblem | null>(null);
   const [outputType, setOutputType] = useState<OutputType>("Cold Email");
   const [step, setStep] = useState<Step>(1);
