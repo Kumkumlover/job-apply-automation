@@ -37,7 +37,7 @@ async function scrapeUrl(url: string): Promise<string | null> {
 
 // ─── Gemini API ─────────────────────────────────────────────────
 
-const GEMINI_MODEL = "gemini-3.5-flash";
+const GEMINI_MODEL = "gemini-1.5-flash";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -73,12 +73,18 @@ async function callGemini(
   prompt: string,
   apiKey: string,
   useSearch: boolean = false,
-  useSchema: boolean = false
+  useSchema: boolean = false,
+  fileParts?: { inlineData: { mimeType: string; data: string } }[]
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
+  const parts: any[] = [{ text: prompt }];
+  if (fileParts) {
+    parts.push(...fileParts);
+  }
+
   const body: Record<string, unknown> = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
   };
 
   if (useSearch) {
@@ -196,6 +202,18 @@ export async function ingestUrl(
   const prompt = `SCRAPE URL: ${url}. Extract PM evidence or industry insights. Ignore generic boilerplate. Return only the extracted text.`;
 
   return await callGemini(prompt, apiKey, true);
+}
+
+export async function ingestFile(
+  base64Data: string,
+  mimeType: string,
+  apiKey: string
+): Promise<string> {
+  const prompt = `Extract PM evidence, resume details, or industry insights from this document. Ignore generic boilerplate. Return only the extracted text.`;
+  
+  return await callGemini(prompt, apiKey, false, false, [
+    { inlineData: { mimeType, data: base64Data } }
+  ]);
 }
 
 // ─── Main Research Pipeline ─────────────────────────────────────

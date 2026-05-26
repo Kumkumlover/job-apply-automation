@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
-import { Copy, Briefcase, CheckCircle, Database, Sparkles, Loader2, Search, Globe, Trash2, FileText, Link, X, Lightbulb, UserPlus, Layers } from "lucide-react";
+import { Copy, Briefcase, CheckCircle, Database, Sparkles, Loader2, Search, Globe, Trash2, FileText, Link, X, Lightbulb, UserPlus, Layers, Upload } from "lucide-react";
 import type { VaultItem, ResearchProblem, OutputType } from "@/lib/email-generator/types";
 import { generateCopy } from "@/lib/email-generator/templates";
 
@@ -35,10 +35,23 @@ export default function EmailGeneratorPage() {
 
   const [vault, setVault] = useState<VaultItem[]>([]);
   const [vaultType, setVaultType] = useState<"evidence" | "inspiration">("evidence");
-  const [isAddingContext, setIsAddingContext] = useState<"text" | "link" | null>(null);
+  const [isAddingContext, setIsAddingContext] = useState<"text" | "link" | "file" | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
+  const [selectedFile, setSelectedFile] = useState<{ base64: string, mimeType: string, name: string } | null>(null);
   const [isDigesting, setIsDigesting] = useState(false);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      const base64 = result.split(',')[1];
+      setSelectedFile({ base64, mimeType: file.type || "application/octet-stream", name: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => { fetchVault(); }, []);
 
@@ -54,10 +67,17 @@ export default function EmailGeneratorPage() {
     try {
       const body: Record<string, string> = { title: newTitle || "Untitled", vaultType };
       if (isAddingContext === "link") { body.url = newTitle; body.geminiApiKey = geminiKey; }
+      else if (isAddingContext === "file") {
+        if (!selectedFile) throw new Error("Please select a file.");
+        body.title = newTitle || selectedFile.name;
+        body.base64Data = selectedFile.base64;
+        body.mimeType = selectedFile.mimeType;
+        body.geminiApiKey = geminiKey;
+      }
       else { body.content = newContent; body.type = "text"; }
       const res = await fetch("/api/email-generator/vault", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
-      setNewTitle(""); setNewContent(""); setIsAddingContext(null); await fetchVault();
+      setNewTitle(""); setNewContent(""); setIsAddingContext(null); setSelectedFile(null); await fetchVault();
     } catch (err) { setError((err as Error).message); }
     finally { setIsDigesting(false); }
   };
@@ -120,6 +140,9 @@ export default function EmailGeneratorPage() {
               <button onClick={() => setIsAddingContext("link")} className="flex-1 flex flex-col items-center gap-1 p-3 rounded-xl bg-[#0a0a0b] border border-[#1e1e22] hover:border-emerald-500/30 transition-all">
                 <Link className="w-4 h-4 text-emerald-400" /><span className="text-[8px] font-bold uppercase text-slate-500">URL</span>
               </button>
+              <button onClick={() => setIsAddingContext("file")} className="flex-1 flex flex-col items-center gap-1 p-3 rounded-xl bg-[#0a0a0b] border border-[#1e1e22] hover:border-purple-500/30 transition-all">
+                <Upload className="w-4 h-4 text-purple-400" /><span className="text-[8px] font-bold uppercase text-slate-500">File</span>
+              </button>
             </div>
 
             {isDigesting && (
@@ -133,14 +156,23 @@ export default function EmailGeneratorPage() {
               <div className="mb-4 bg-[#0a0a0b] p-4 rounded-xl border border-indigo-500/20 relative">
                 <button onClick={() => setIsAddingContext(null)} className="absolute top-3 right-3 text-slate-500 hover:text-slate-300"><X className="w-4 h-4" /></button>
                 <div className="space-y-3">
-                  <input type="text" placeholder={isAddingContext === "link" ? "Paste URL..." : "Title..."} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-                    className="w-full bg-[#111113] p-2.5 rounded-lg border border-[#2a2a30] text-xs text-white outline-none" />
+                  {isAddingContext !== "file" && (
+                    <input type="text" placeholder={isAddingContext === "link" ? "Paste URL..." : "Title..."} value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+                      className="w-full bg-[#111113] p-2.5 rounded-lg border border-[#2a2a30] text-xs text-white outline-none" />
+                  )}
+                  {isAddingContext === "file" && (
+                    <>
+                      <input type="text" placeholder="Optional Custom Title..." value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+                        className="w-full bg-[#111113] p-2.5 rounded-lg border border-[#2a2a30] text-xs text-white outline-none" />
+                      <input type="file" onChange={handleFileSelect} className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-600/20 file:text-indigo-400 hover:file:bg-indigo-600/30 transition-all cursor-pointer" />
+                    </>
+                  )}
                   {isAddingContext === "text" && (
                     <textarea placeholder="Paste content..." rows={3} value={newContent} onChange={(e) => setNewContent(e.target.value)}
                       className="w-full bg-[#111113] p-2.5 rounded-lg border border-[#2a2a30] text-xs text-white outline-none" />
                   )}
-                  <button onClick={addVaultItem} disabled={isDigesting} className="w-full bg-indigo-600 text-white py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-indigo-500 disabled:opacity-50">
-                    {isAddingContext === "link" ? "Ingest URL" : "Save"}
+                  <button onClick={addVaultItem} disabled={isDigesting || (isAddingContext === "file" && !selectedFile)} className="w-full bg-indigo-600 text-white py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-indigo-500 disabled:opacity-50">
+                    {isAddingContext === "link" ? "Ingest URL" : isAddingContext === "file" ? "Ingest File" : "Save"}
                   </button>
                 </div>
               </div>

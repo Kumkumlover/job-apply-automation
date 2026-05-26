@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { vaultStore } from "@/lib/email-generator/vault";
-import { ingestUrl } from "@/lib/email-generator/research";
+import { ingestUrl, ingestFile } from "@/lib/email-generator/research";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { title, content, type, vaultType, url, geminiApiKey } = body;
+    const { title, content, type, vaultType, url, geminiApiKey, base64Data, mimeType } = body;
 
     if (!vaultType || !["evidence", "inspiration"].includes(vaultType)) {
       return NextResponse.json(
@@ -41,10 +41,18 @@ export async function POST(req: NextRequest) {
 
     let finalContent = content || "";
     let finalType = type || "text";
+    const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
 
-    // If a URL is provided, ingest it via Gemini
-    if (url) {
-      const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
+    if (base64Data && mimeType) {
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "GEMINI_API_KEY required for file ingestion." },
+          { status: 400 }
+        );
+      }
+      finalContent = await ingestFile(base64Data, mimeType, apiKey);
+      finalType = "file";
+    } else if (url) {
       if (!apiKey) {
         return NextResponse.json(
           { error: "GEMINI_API_KEY required for URL ingestion." },
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     if (!finalContent) {
       return NextResponse.json(
-        { error: "Content is required (or provide a url to ingest)." },
+        { error: "Content is required (or provide a url/file to ingest)." },
         { status: 400 }
       );
     }
