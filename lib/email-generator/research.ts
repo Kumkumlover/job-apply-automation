@@ -37,7 +37,7 @@ async function scrapeUrl(url: string): Promise<string | null> {
 
 // ─── Gemini API ─────────────────────────────────────────────────
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-3.5-flash";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
