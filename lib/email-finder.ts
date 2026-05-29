@@ -160,14 +160,18 @@ async function getTopPatterns(domain: string, limit: number = 3): Promise<Patter
     }
   }
 
-  // If we have no patterns at all, use defaults
-  if (merged.length === 0) {
-    return DEFAULT_PATTERNS.slice(0, limit).map((p) => ({
-      pattern: p,
-      domain: null,
-      successCount: 1,
-      usageCount: 2,
-    }));
+  // Fill the rest with defaults if we haven't reached the limit
+  for (const p of DEFAULT_PATTERNS) {
+    if (merged.length >= limit) break;
+    if (!seen.has(p)) {
+      seen.add(p);
+      merged.push({
+        pattern: p,
+        domain: null,
+        successCount: 1,
+        usageCount: 2,
+      });
+    }
   }
 
   return merged.slice(0, limit);
