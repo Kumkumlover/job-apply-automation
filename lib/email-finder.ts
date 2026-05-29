@@ -440,7 +440,7 @@ Common patterns: first.last, firstinitial+last, etc. Return ONLY a JSON array of
 
       results.push({
         email: guess,
-        type: isEmailValid ? "verified" : "predicted",
+        type: "predicted",
         confidence: isEmailValid ? 0.95 : (guess.endsWith(domain) ? 0.75 : 0.53),
         source: "LLM Deep Search",
       });

@@ -156,7 +156,7 @@ export default function EmailFinderPage() {
         <div className="absolute bottom-0 right-0 w-[500px] h-[400px] bg-purple-600/5 rounded-full blur-[100px]" />
       </div>
 
-      <div className="relative z-10 max-w-5xl mx-auto px-6 py-12 space-y-8">
+      <div className="relative z-10 w-full max-w-[98%] mx-auto px-6 py-12 space-y-8">
         {/* Header */}
         <header className="space-y-2">
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
@@ -345,7 +345,7 @@ export default function EmailFinderPage() {
               Intelligence Results
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {results.map((personResult, idx) => (
                 <div
                   key={idx}
@@ -403,6 +403,9 @@ export default function EmailFinderPage() {
                                   }`}
                                 >
                                   {emailData.type}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-[#1e1e22] text-slate-400 border border-[#2a2a30]">
+                                  {emailData.source}
                                 </span>
                                 <span className="text-xs text-slate-500">
                                   {Math.round(emailData.confidence * 100)}%
