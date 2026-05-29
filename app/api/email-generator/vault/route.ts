@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { vaultStore } from "@/lib/email-generator/vault";
 import { ingestUrl, ingestFile } from "@/lib/email-generator/research";
+import mammoth from "mammoth";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -50,7 +51,26 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      finalContent = await ingestFile(base64Data, mimeType, apiKey);
+      
+      let processedBase64 = base64Data;
+      let processedMime = mimeType;
+
+      if (mimeType.includes("wordprocessingml") || mimeType.includes("msword")) {
+        try {
+          const buffer = Buffer.from(base64Data, "base64");
+          const result = await mammoth.extractRawText({ buffer });
+          const text = result.value;
+          processedBase64 = Buffer.from(text, "utf-8").toString("base64");
+          processedMime = "text/plain";
+        } catch (error) {
+          return NextResponse.json(
+            { error: "Failed to parse Word document." },
+            { status: 400 }
+          );
+        }
+      }
+      
+      finalContent = await ingestFile(processedBase64, processedMime, apiKey);
       finalType = "file";
     } else if (url) {
       if (!apiKey) {
