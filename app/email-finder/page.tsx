@@ -79,11 +79,11 @@ export default function EmailFinderPage() {
     setResults(null);
 
     const payload = people
-      .filter((p) => p.name && p.company && p.domain)
+      .filter((p) => p.name && p.company)
       .map((p) => ({ name: p.name, company: p.company, domain: p.domain }));
 
     if (payload.length === 0) {
-      setError("Please fill in all fields for at least one person.");
+      setError("Please fill in Name and Company for at least one person.");
       setStatus("error");
       return;
     }

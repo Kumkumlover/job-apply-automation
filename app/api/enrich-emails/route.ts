@@ -27,16 +27,16 @@ export async function POST(req: NextRequest) {
 
     if (people.length === 0) {
       return NextResponse.json(
-        { error: "Please provide at least one person with name, company, and domain." },
+        { error: "Please provide at least one person with name and company." },
         { status: 400 }
       );
     }
 
     // Validate each person
     for (const p of people) {
-      if (!p.name || !p.company || !p.domain) {
+      if (!p.name || !p.company) {
         return NextResponse.json(
-          { error: `Missing required fields for "${p.name || "unknown"}". Need name, company, and domain.` },
+          { error: `Missing required fields for "${p.name || "unknown"}". Need name and company.` },
           { status: 400 }
         );
       }

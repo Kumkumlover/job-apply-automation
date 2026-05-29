@@ -332,18 +332,44 @@ async function searchPublicEmail(name: string, company: string, domain: string):
 
 // ─── Main Intelligence Engine ───────────────────────────────────
 
+function extractDomain(input: string): string {
+  if (!input) return "";
+  try {
+    let raw = input.toLowerCase().trim();
+    if (!raw.startsWith("http")) raw = "https://" + raw;
+    const url = new URL(raw);
+    let hostname = url.hostname;
+    if (hostname.startsWith("www.")) hostname = hostname.slice(4);
+    return hostname;
+  } catch {
+    return input.toLowerCase().trim();
+  }
+}
+
 async function processPerson(
   person: PersonInput,
   hunterKey: string,
   apolloKey: string
 ): Promise<PersonResult> {
   const { first, last } = parseName(person.name);
-  const domain = person.domain.toLowerCase().trim();
+  let domain = extractDomain(person.domain ?? "");
+
+  if (!domain) {
+    const guesses = await llmGuessDomains(person.company, "");
+    if (guesses.length > 0) {
+      domain = guesses[0];
+    } else {
+      return formatOutput({ ...person, domain: "Unknown" }, []);
+    }
+  }
+
+  // Ensure the person object reflects the resolved domain
+  const resolvedPerson = { ...person, domain };
 
   // 1. Check cache first
-  const cached = await store.getCachedEmails(person.name, domain);
+  const cached = await store.getCachedEmails(resolvedPerson.name, domain);
   if (cached.length > 0) {
-    return formatOutput(person, cached.map((c) => ({
+    return formatOutput(resolvedPerson, cached.map((c) => ({
       email: c.email,
       type: (c.verified ? "verified" : c.source === "Pattern Engine" ? "predicted" : "discovered") as "verified" | "discovered" | "predicted",
       confidence: c.confidence,
@@ -355,19 +381,18 @@ async function processPerson(
 
   // 1.5 Public Web Search (Free)
   // If email is publicly available (e.g., LinkedIn bio, press release), skip Hunter.
-  const publicEmail = await searchPublicEmail(person.name, person.company, domain);
+  const publicEmail = await searchPublicEmail(resolvedPerson.name, resolvedPerson.company, domain);
   if (publicEmail) {
     const pattern = extractPattern(first, last, publicEmail.split("@")[0]);
-    await store.saveEmail(publicEmail, person.name, domain, pattern, 0.90, "Public Web Search", true);
+    await store.saveEmail(publicEmail, resolvedPerson.name, domain, pattern, 0.90, "Public Web Search", true);
     await store.recordPatternSuccess(pattern, domain);
 
-    return formatOutput(person, [
+    return formatOutput(resolvedPerson, [
       { email: publicEmail, type: "verified", confidence: 0.90, source: "Public Web Search" },
     ]);
   }
 
   // 2. API Lookups (max 2 per domain)
-  // Ensure we get at least 2 verified emails to confidently establish the domain pattern.
   const apiCalls = store.getApiCalls(domain);
 
   if (apiCalls < 2) {
@@ -376,80 +401,70 @@ async function processPerson(
     if (hunterResult) {
       store.incrementApiCall(domain);
       const pattern = extractPattern(first, last, hunterResult.email.split("@")[0]);
-      await store.saveEmail(hunterResult.email, person.name, domain, pattern, 0.95, hunterResult.source, true);
+      await store.saveEmail(hunterResult.email, resolvedPerson.name, domain, pattern, 0.95, hunterResult.source, true);
       await store.recordPatternSuccess(pattern, domain);
 
-      return formatOutput(person, [
+      return formatOutput(resolvedPerson, [
         { email: hunterResult.email, type: "verified", confidence: 0.95, source: hunterResult.source },
       ]);
     }
 
     // Try Apollo
-    if (apiCalls < 1) {
-      const apolloResult = await apolloLookup(person.name, person.company, domain, apolloKey);
+    if (apiCalls < 2) {
+      const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
       if (apolloResult) {
         store.incrementApiCall(domain);
         const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
-        await store.saveEmail(apolloResult.email, person.name, domain, pattern, 0.85, apolloResult.source, false);
+        await store.saveEmail(apolloResult.email, resolvedPerson.name, domain, pattern, 0.85, apolloResult.source, false);
         await store.recordPatternSuccess(pattern, domain);
 
-        return formatOutput(person, [
+        return formatOutput(resolvedPerson, [
           { email: apolloResult.email, type: "discovered", confidence: 0.85, source: apolloResult.source },
         ]);
       }
     }
   }
 
-  // 3. LLM Deep Search — guess alternate domains & predict best pattern
-  const allDomains = await llmGuessDomains(person.company, domain);
-  const llmPattern = await llmPredictPattern(person.company, domain);
+  // 3. LLM Deep Search
+  if (results.length === 0) {
+    const prompt = `Generate the 3 most likely professional email addresses for ${resolvedPerson.name} working at ${resolvedPerson.company} (domain: ${domain}). 
+Common patterns: first.last, firstinitial+last, etc. Return ONLY a JSON array of strings. Example: ["f.last@domain.com"]`;
+    const guesses = await askJSON<string[]>(prompt);
 
-  // 4. Pattern-based prediction with DNS validation
-  const topPatterns = await getTopPatterns(domain, 4);
-  const seenEmails = new Set<string>();
+    for (const guess of guesses.slice(0, 3)) {
+      if (!guess.includes("@")) continue;
+      const validation = await validateEmail(guess);
+      const isEmailValid = validation.mx_ok && validation.domain_ok;
+      const pattern = extractPattern(first, last, guess.split("@")[0]);
+      await store.saveEmail(guess, resolvedPerson.name, domain, pattern, isEmailValid ? 0.95 : 0.53, "LLM Deep Search", isEmailValid);
 
-  // If LLM predicted a specific pattern, try it first
-  if (llmPattern && !topPatterns.some(p => p.pattern === llmPattern)) {
-    topPatterns.unshift({
-      pattern: llmPattern,
-      domain,
-      successCount: 1,
-      usageCount: 1,
-    });
+      results.push({
+        email: guess,
+        type: isEmailValid ? "verified" : "predicted",
+        confidence: isEmailValid ? 0.95 : (guess.endsWith(domain) ? 0.75 : 0.53),
+        source: "LLM Deep Search",
+      });
+    }
   }
 
-  // Try all domains (original + LLM-guessed) × all patterns
-  for (const tryDomain of allDomains) {
-    for (const pat of topPatterns) {
-      const predicted = generateFromPattern(first, last, pat.pattern, tryDomain);
-      if (!predicted || seenEmails.has(predicted)) continue;
-      seenEmails.add(predicted);
+  // 4. Pattern-based prediction
+  const topPatterns = await getTopPatterns(domain, 4);
+  const llmPattern = await llmPredictPattern(resolvedPerson.company, domain);
 
-      // Real DNS validation
-      const validation = await validateEmail(predicted);
+  if (llmPattern && !topPatterns.some(p => p.pattern === llmPattern)) {
+    topPatterns.unshift({ pattern: llmPattern, domain, successCount: 1, usageCount: 1 });
+  }
 
-      if (validation.mx_ok && validation.domain_ok && !validation.disposable) {
-        const baseRate = Math.max(
-          pat.successCount / Math.max(pat.usageCount, 1),
-          0.3
-        );
-        const validationModifier = Math.max(validation.recruiting_score, 0.5);
-        // Boost confidence slightly if LLM suggested this domain/pattern
-        const llmBoost = (tryDomain !== domain || pat.pattern === llmPattern) ? 1.1 : 1.0;
-        const finalConfidence = Math.min(0.95, Math.round(baseRate * validationModifier * 0.8 * llmBoost * 100) / 100);
+  for (const pat of topPatterns) {
+    const predicted = generateFromPattern(first, last, pat.pattern, domain);
+    if (!predicted) continue;
 
-        const source = tryDomain !== domain ? "LLM Deep Search" : "Pattern Engine";
-        results.push({
-          email: predicted,
-          type: "predicted",
-          confidence: finalConfidence,
-          source,
-        });
-
-        await store.saveEmail(predicted, person.name, tryDomain, pat.pattern, finalConfidence, source, false);
-      }
-
-      if (results.length >= 5) break;
+    const validation = await validateEmail(predicted);
+    if (validation.mx_ok && validation.domain_ok) {
+      const baseRate = Math.max(pat.successCount / Math.max(pat.usageCount, 1), 0.3);
+      const finalConfidence = Math.min(0.95, Math.round(baseRate * 100) / 100);
+      results.push({ email: predicted, type: "predicted", confidence: finalConfidence, source: "Pattern Engine" });
+      await store.saveEmail(predicted, resolvedPerson.name, domain, pat.pattern, finalConfidence, "Pattern Engine", false);
     }
     if (results.length >= 5) break;
   }
