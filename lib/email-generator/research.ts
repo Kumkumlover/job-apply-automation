@@ -191,7 +191,24 @@ TASK:
 6. 'linkedinHook': If a LEAD LINKEDIN URL is provided, formulate a personalized, warm 1-2 sentence opening hook using the [LEAD SCRAPED CONTEXT]. If context is missing, use Google Search. DO NOT return an empty string if a URL is provided. ONLY return "" if LEAD LINKEDIN URL is 'None provided'.
 7. 'speculativePitch': Analyze the [COMPANY WEBSITE CONTEXT]. Write a 1-2 sentence observation identifying their core product value proposition and 1-2 likely competitors/alternatives in their space. Frame this as an exciting challenge for a 0-1 Product Manager to tackle.
 
-OUTPUT REQUIREMENTS: Return valid JSON strictly adhering to the requested schema. Do not include markdown formatting.`;
+OUTPUT REQUIREMENTS: You MUST return ONLY a raw, perfectly formatted JSON object. Do NOT include markdown fences, and do NOT include any text outside the JSON. Follow this exact structure:
+{
+  "problems": [
+    {
+      "id": "1",
+      "title": "Short title",
+      "problem": "Description",
+      "hypothesis": "Hypothesis",
+      "pmGoal": "Goal",
+      "hook": "Exact TITLE of the Evidence document",
+      "citation": "Summary of evidence",
+      "companyMission": "an intuitive clinical AI ecosystem",
+      "matchedStrengths": "0-1 product delivery and scaling AI agents",
+      "linkedinHook": "Your hook here",
+      "speculativePitch": "Your speculative pitch here"
+    }
+  ]
+}`;
 }
 
 // ─── Ingestion: Extract text from URLs via Gemini + Search ──────
