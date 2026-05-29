@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, type FormEvent } from "react";
+import React, { useState, useEffect, type FormEvent } from "react";
 import {
   Settings,
   UserPlus,
@@ -45,6 +45,20 @@ type Status = "idle" | "loading" | "success" | "error";
 export default function EmailFinderPage() {
   const [apiKeys, setApiKeys] = useState({ hunter: "", apollo: "" });
   const [showKeys, setShowKeys] = useState(false);
+
+  // Load saved keys on mount
+  useEffect(() => {
+    const savedHunter = localStorage.getItem("hunterKey");
+    const savedApollo = localStorage.getItem("apolloKey");
+    if (savedHunter || savedApollo) {
+      setApiKeys({ hunter: savedHunter || "", apollo: savedApollo || "" });
+    }
+  }, []);
+
+  const handleKeyChange = (provider: "hunter" | "apollo", val: string) => {
+    setApiKeys((prev) => ({ ...prev, [provider]: val }));
+    localStorage.setItem(`${provider}Key`, val);
+  };
   const [people, setPeople] = useState<PersonRow[]>([
     { id: Date.now(), name: "", company: "", domain: "" },
   ]);
@@ -177,31 +191,40 @@ export default function EmailFinderPage() {
           {showKeys && (
             <div className="px-6 pb-6 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-[#1e1e22] pt-6">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                  <Key className="w-4 h-4 text-orange-400" /> Hunter.io API
-                  Key
+                <label className="text-sm font-medium text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-orange-400" /> Hunter.io API Key
+                  </span>
+                  {apiKeys.hunter.length > 5 && (
+                    <span className="text-xs text-green-400 flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Saved & Active
+                    </span>
+                  )}
                 </label>
                 <input
                   type="password"
                   placeholder="Enter Hunter API key..."
                   value={apiKeys.hunter}
-                  onChange={(e) =>
-                    setApiKeys({ ...apiKeys, hunter: e.target.value })
-                  }
+                  onChange={(e) => handleKeyChange("hunter", e.target.value)}
                   className="w-full px-4 py-2.5 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 outline-none transition-all"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                  <Key className="w-4 h-4 text-indigo-400" /> Apollo.io API Key
+                <label className="text-sm font-medium text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-indigo-400" /> Apollo.io API Key
+                  </span>
+                  {apiKeys.apollo.length > 5 && (
+                    <span className="text-xs text-green-400 flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Saved & Active
+                    </span>
+                  )}
                 </label>
                 <input
                   type="password"
                   placeholder="Enter Apollo API key..."
                   value={apiKeys.apollo}
-                  onChange={(e) =>
-                    setApiKeys({ ...apiKeys, apollo: e.target.value })
-                  }
+                  onChange={(e) => handleKeyChange("apollo", e.target.value)}
                   className="w-full px-4 py-2.5 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 outline-none transition-all"
                 />
               </div>
