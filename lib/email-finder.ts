@@ -307,6 +307,29 @@ async function apolloLookup(
   }
 }
 
+// ─── Public Web Search ────────────────────────────────────────────
+
+/** Scrape DuckDuckGo for publicly available emails (e.g. LinkedIn bios) */
+async function searchPublicEmail(name: string, company: string, domain: string): Promise<string | null> {
+  try {
+    const query = encodeURIComponent(`"${name}" "${company}" "@${domain}"`);
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const regex = new RegExp(`[a-zA-Z0-9._%+-]+@${domain.replace(/\./g, '\\.')}`, 'gi');
+    const matches = html.match(regex);
+    if (matches && matches.length > 0) {
+      return matches[0].toLowerCase();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Main Intelligence Engine ───────────────────────────────────
 
 async function processPerson(
@@ -330,10 +353,24 @@ async function processPerson(
 
   const results: EmailResult[] = [];
 
-  // 2. API Lookups (max 1 per domain)
+  // 1.5 Public Web Search (Free)
+  // If email is publicly available (e.g., LinkedIn bio, press release), skip Hunter.
+  const publicEmail = await searchPublicEmail(person.name, person.company, domain);
+  if (publicEmail) {
+    const pattern = extractPattern(first, last, publicEmail.split("@")[0]);
+    await store.saveEmail(publicEmail, person.name, domain, pattern, 0.90, "Public Web Search", true);
+    await store.recordPatternSuccess(pattern, domain);
+
+    return formatOutput(person, [
+      { email: publicEmail, type: "verified", confidence: 0.90, source: "Public Web Search" },
+    ]);
+  }
+
+  // 2. API Lookups (max 2 per domain)
+  // Ensure we get at least 2 verified emails to confidently establish the domain pattern.
   const apiCalls = store.getApiCalls(domain);
 
-  if (apiCalls < 1) {
+  if (apiCalls < 2) {
     // Try Hunter first
     const hunterResult = await hunterLookup(domain, first, last, hunterKey);
     if (hunterResult) {

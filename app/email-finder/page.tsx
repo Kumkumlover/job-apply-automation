@@ -389,7 +389,7 @@ export default function EmailFinderPage() {
                             </div>
 
                             {/* Feedback Actions */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 transition-opacity">
                               {feedbackGiven[emailData.email] === "correct" ? (
                                 <span className="text-xs font-medium text-green-400 px-2 py-1 bg-green-500/10 rounded">
                                   ✓ Verified
