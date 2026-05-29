@@ -1,15 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 
 const prismaClientSingleton = () => {
+  const dbUrl = process.env.DATABASE_URL || "postgresql://postgres.tgdmneglszmilwwkwzdt:Shigupta%40123@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true";
+  
   return new PrismaClient({
     log: ["query"],
-    ...(process.env.DATABASE_URL ? {
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL
-        }
+    datasources: {
+      db: {
+        url: dbUrl
       }
-    } : {})
+    }
   })
 }
 
