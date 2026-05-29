@@ -330,10 +330,10 @@ async function processPerson(
 
   const results: EmailResult[] = [];
 
-  // 2. API Lookups (max 2 per domain)
+  // 2. API Lookups (max 1 per domain)
   const apiCalls = store.getApiCalls(domain);
 
-  if (apiCalls < 2) {
+  if (apiCalls < 1) {
     // Try Hunter first
     const hunterResult = await hunterLookup(domain, first, last, hunterKey);
     if (hunterResult) {
