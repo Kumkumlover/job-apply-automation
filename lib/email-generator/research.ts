@@ -10,6 +10,7 @@
 
 import type { ResearchInput, ResearchResult, VaultItem } from "./types";
 import { vaultStore } from "./vault";
+import mammoth from "mammoth";
 
 const USER_PERSONA =
   "Shikhar Gupta: APM specializing in AI Agents, CRM automation, and Q-Commerce. Expert in 0-1 product delivery and metrics-driven optimization. Focus on quantitative outcomes.";
@@ -199,9 +200,46 @@ export async function ingestUrl(
   url: string,
   apiKey: string
 ): Promise<string> {
-  const prompt = `SCRAPE URL: ${url}. Extract PM evidence or industry insights. Ignore generic boilerplate. Return only the extracted text.`;
+  // Attempt to fetch the URL directly
+  try {
+    const cleanUrl = url.replace(/^(https?:\/\/)?/, "https://");
+    const res = await fetch(cleanUrl);
+    if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      const isPdf = contentType.includes("application/pdf");
+      const isImage = contentType.includes("image/");
+      const isWord = contentType.includes("wordprocessingml") || contentType.includes("msword");
 
-  return await callGemini(prompt, apiKey, true);
+      if (isPdf || isImage || isWord) {
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        let base64Data = buffer.toString("base64");
+        let mimeType = contentType.split(';')[0]; // strip charset
+
+        if (isWord) {
+          const result = await mammoth.extractRawText({ buffer });
+          base64Data = Buffer.from(result.value, "utf-8").toString("base64");
+          mimeType = "text/plain";
+        }
+
+        return await ingestFile(base64Data, mimeType, apiKey);
+      }
+    }
+  } catch (err) {
+    console.log("Direct fetch failed, falling back to Jina/Search...", err);
+  }
+
+  // Fallback to Jina for HTML content
+  const scrapedText = await scrapeUrl(url);
+  let promptContext = "";
+  if (scrapedText) {
+    promptContext = `\n\n[SCRAPED CONTENT VIA JINA]:\n${scrapedText}`;
+  }
+
+  const prompt = `SCRAPE URL: ${url}. Extract PM evidence or industry insights. Ignore generic boilerplate. Return only the extracted text.${promptContext}`;
+
+  // Use Gemini search as a last resort if Jina also fails
+  return await callGemini(prompt, apiKey, !scrapedText);
 }
 
 export async function ingestFile(
