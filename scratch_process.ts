@@ -2,11 +2,12 @@ import { enrichAll } from "./lib/email-finder";
 
 async function test() {
   const people = [
-    { name: "Abhilasha Jain", company: "IDFC FIRST Bank", domain: "" },
-    { name: "Kishor Sonar", company: "IDFC FIRST Bank", domain: "" }
+    { name: "John Doe", company: "A Completely Fake Company LLC", domain: "completelyfake12345.com" },
+    { name: "Jane Smith", company: "A Completely Fake Company LLC", domain: "completelyfake12345.com" }
   ];
 
-  const results = await enrichAll(people, "c9dff947f42d6e4cc5ffa72f84cc4a545a07e708", "");
+  // We pass an empty hunter key so it fails or we pass a fake domain so it fails.
+  const results = await enrichAll(people, "fakekey", "");
   console.log(JSON.stringify(results, null, 2));
 }
 

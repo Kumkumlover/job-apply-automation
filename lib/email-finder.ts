@@ -464,48 +464,45 @@ async function processPerson(
     );
   }
 
-  // 3. LLM Deep Search
+  // 4. Self-Training Permutation Engine
+  // If no API results are found, we generate all permutations and score them based on past successes.
   if (results.length === 0) {
-    const prompt = `Generate the 3 most likely professional email addresses for ${resolvedPerson.name} working at ${resolvedPerson.company} (domain: ${domain}). 
-Common patterns: first.last, firstinitial+last, etc. Return ONLY a JSON array of strings. Example: ["f.last@domain.com"]`;
-    const guesses = await askJSON<string[]>(prompt);
-
-    for (const guess of guesses.slice(0, 3)) {
-      if (!guess.includes("@")) continue;
-      const validation = await validateEmail(guess);
-      const isEmailValid = validation.mx_ok && validation.domain_ok;
-      const pattern = extractPattern(first, last, guess.split("@")[0]);
-      await store.saveEmail(guess, resolvedPerson.name, domain, pattern, isEmailValid ? 0.95 : 0.53, "LLM Deep Search", false);
-
-      results.push({
-        email: guess,
-        type: "predicted",
-        confidence: isEmailValid ? 0.95 : (guess.endsWith(domain) ? 0.75 : 0.53),
-        source: "LLM Deep Search",
-      });
+    const allPerms = generatePermutations(first, last, domain);
+    const topPatterns = await getTopPatterns(domain, 30);
+    
+    // Create a scoring map from the top patterns
+    const patternScores = new Map<string, number>();
+    for (const p of topPatterns) {
+      // Base rate maxed at 0.95 for perfect historical match, default to 0.3 for unknown
+      const baseRate = Math.max(p.successCount / Math.max(p.usageCount, 1), 0.3);
+      const score = Math.min(0.95, Math.round(baseRate * 100) / 100);
+      patternScores.set(p.pattern, score);
     }
-  }
 
-  // 4. Pattern-based prediction
-  const topPatterns = await getTopPatterns(domain, 4);
-  const llmPattern = await llmPredictPattern(resolvedPerson.company, domain);
+    const scoredPerms = allPerms.map(perm => ({
+      ...perm,
+      score: patternScores.get(perm.pattern) || 0.2 // 0.2 for completely unknown permutations
+    }));
 
-  if (llmPattern && !topPatterns.some(p => p.pattern === llmPattern)) {
-    topPatterns.unshift({ pattern: llmPattern, domain, successCount: 1, usageCount: 1 });
-  }
+    // Sort by historical score descending
+    scoredPerms.sort((a, b) => b.score - a.score);
 
-  for (const pat of topPatterns) {
-    const predicted = generateFromPattern(first, last, pat.pattern, domain);
-    if (!predicted) continue;
+    // Test the top 5 most likely permutations
+    for (const guess of scoredPerms.slice(0, 5)) {
+      if (results.some((r) => r.email === guess.email)) continue;
 
-    const validation = await validateEmail(predicted);
-    if (validation.mx_ok && validation.domain_ok) {
-      const baseRate = Math.max(pat.successCount / Math.max(pat.usageCount, 1), 0.3);
-      const finalConfidence = Math.min(0.95, Math.round(baseRate * 100) / 100);
-      results.push({ email: predicted, type: "predicted", confidence: finalConfidence, source: "Pattern Engine" });
-      await store.saveEmail(predicted, resolvedPerson.name, domain, pat.pattern, finalConfidence, "Pattern Engine", false);
+      const validation = await validateEmail(guess.email);
+      if (validation.mx_ok && validation.domain_ok) {
+        results.push({ 
+          email: guess.email, 
+          type: "predicted", 
+          confidence: guess.score, 
+          source: "Pattern Engine" 
+        });
+        
+        await store.saveEmail(guess.email, resolvedPerson.name, domain, guess.pattern, guess.score, "Pattern Engine", false);
+      }
     }
-    if (results.length >= 5) break;
   }
 
   return formatOutput(person, results);
