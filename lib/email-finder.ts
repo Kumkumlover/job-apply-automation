@@ -547,8 +547,10 @@ async function processPerson(
     // Sort by historical score descending
     scoredPerms.sort((a, b) => b.score - a.score);
 
-    // Test the top 15 most likely permutations
+    // Test the top 15 most likely permutations, but only keep the top 5 valid ones
+    let validCount = 0;
     for (const guess of scoredPerms.slice(0, 15)) {
+      if (validCount >= 5) break;
       if (results.some((r) => r.email === guess.email)) continue;
 
       const validation = await validateEmail(guess.email);
@@ -559,6 +561,7 @@ async function processPerson(
           confidence: guess.score, 
           source: "Pattern Engine" 
         });
+        validCount++;
         
         await store.saveEmail(guess.email, resolvedPerson.name, domain, guess.pattern, guess.score, "Pattern Engine", false);
       }
