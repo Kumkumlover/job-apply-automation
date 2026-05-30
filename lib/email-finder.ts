@@ -269,13 +269,20 @@ async function hunterLookup(
     });
 
     const res = await fetch(`https://api.hunter.io/v2/email-finder?${params}`);
-    if (!res.ok) return null;
+    console.log(`Hunter lookup for ${domain}: status ${res.status}`);
+    
+    if (!res.ok) {
+      console.log(`Hunter error: ${await res.text()}`);
+      return null;
+    }
 
     const data = await res.json();
+    console.log(`Hunter response data: ${JSON.stringify(data).substring(0, 100)}`);
     if (!data?.data?.email) return null;
 
     return { email: data.data.email, source: "Hunter.io" };
-  } catch {
+  } catch (error) {
+    console.log(`Hunter exception:`, error);
     return null;
   }
 }
@@ -369,11 +376,15 @@ async function processPerson(
 
   // Ensure the person object reflects the resolved domain
   const resolvedPerson = { ...person, domain };
+  console.log(`processPerson: ${person.name} | company: ${person.company} | resolved domain: ${domain}`);
 
   // 1. Check cache first
   const cached = await store.getCachedEmails(resolvedPerson.name, domain);
   const hasVerified = cached.some((c) => c.verified);
-  const apiCalls = store.getApiCalls(domain);
+  
+  // Calculate API calls from the database instead of in-memory to survive serverless restarts!
+  const allDomainEmails = await store.getCachedEmailsByDomain(domain);
+  const apiCalls = allDomainEmails.filter(c => c.source === "Hunter.io" || c.source === "Apollo.io").length;
 
   // If we already have verified emails, or we maxed out API limits for this domain, return cache immediately
   if (cached.length > 0 && (hasVerified || apiCalls >= 2)) {
@@ -412,7 +423,6 @@ async function processPerson(
     // Try Hunter first
     const hunterResult = await hunterLookup(domain, first, last, hunterKey);
     if (hunterResult) {
-      store.incrementApiCall(domain);
       const pattern = extractPattern(first, last, hunterResult.email.split("@")[0]);
       await store.saveEmail(hunterResult.email, resolvedPerson.name, domain, pattern, 0.95, hunterResult.source, true);
       await store.recordPatternSuccess(pattern, domain);
@@ -426,7 +436,6 @@ async function processPerson(
     if (apiCalls < 2) {
       const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
       if (apolloResult) {
-        store.incrementApiCall(domain);
         const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
         await store.saveEmail(apolloResult.email, resolvedPerson.name, domain, pattern, 0.85, apolloResult.source, false);
         await store.recordPatternSuccess(pattern, domain);

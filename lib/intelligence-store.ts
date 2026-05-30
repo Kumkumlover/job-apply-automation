@@ -49,6 +49,10 @@ class IntelligenceStore {
     companyApiLimits.set(key, (companyApiLimits.get(key) || 0) + 1);
   }
 
+  clearInMemoryLimits(): void {
+    companyApiLimits.clear();
+  }
+
   // ── Emails ──
 
   async getCachedEmails(name: string, domain: string): Promise<CachedEmail[]> {
@@ -71,6 +75,16 @@ class IntelligenceStore {
       source: e.source,
       verified: e.verified,
     }));
+  }
+
+  async getCachedEmailsByDomain(domain: string): Promise<CachedEmail[]> {
+    const userId = await getDefaultUserId();
+    return prisma.cachedEmail.findMany({
+      where: {
+        userId,
+        domain: domain.toLowerCase()
+      }
+    });
   }
 
   async saveEmail(
