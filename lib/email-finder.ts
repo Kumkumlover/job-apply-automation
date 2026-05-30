@@ -252,6 +252,36 @@ Return ONLY the pattern string (e.g., "{first}.{last}"). No explanation.`;
   }
 }
 
+/**
+ * Use LLM to perform a deep knowledge search for a specific person's email.
+ * This checks if the model already knows the verified email from its training data.
+ */
+async function llmDeepEmailSearch(name: string, company: string, domain: string): Promise<string | null> {
+  try {
+    const prompt = `You are an expert web researcher. Perform a deep knowledge retrieval for the public work email address of "${name}" at the company "${company}" (domain: ${domain}).
+    
+If you are absolutely certain of their real, verified email address based on your training data (e.g., from their public LinkedIn, GitHub, or company website), return ONLY the email address.
+If you are not absolutely certain, or if it's just a guess, return exactly: NOT_FOUND
+
+Do NOT guess. Do NOT return multiple emails. Return ONLY the email address or NOT_FOUND.`;
+
+    const raw = await ask(prompt);
+    const cleaned = raw.trim().toLowerCase();
+    
+    if (cleaned === "not_found" || !cleaned.includes("@")) {
+      return null;
+    }
+    
+    // Quick validation that it matches the domain
+    if (cleaned.endsWith(`@${domain}`)) {
+      return cleaned;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── API Layer (Hunter.io + Apollo.io) ──────────────────────────
 
 async function hunterLookup(
@@ -430,6 +460,19 @@ async function processPerson(
     ]);
   }
 
+  // 1.7 Deep LLM Knowledge Search (Free)
+  // Ask the LLM if it inherently knows this person's email before burning API credits.
+  const llmEmail = await llmDeepEmailSearch(resolvedPerson.name, resolvedPerson.company, domain);
+  if (llmEmail) {
+    const pattern = extractPattern(first, last, llmEmail.split("@")[0]);
+    await store.saveEmail(llmEmail, resolvedPerson.name, domain, pattern, 0.88, "Deep LLM Search", true);
+    await store.recordPatternSuccess(pattern, domain);
+
+    return formatOutput(resolvedPerson, [
+      { email: llmEmail, type: "verified", confidence: 0.88, source: "Deep LLM Search" },
+    ]);
+  }
+
   // 2. API Lookups (max 2 per domain)
   if (domain && hunterKey) {
     const cacheKey = `${resolvedPerson.name}-${domain}`;
@@ -504,8 +547,8 @@ async function processPerson(
     // Sort by historical score descending
     scoredPerms.sort((a, b) => b.score - a.score);
 
-    // Test the top 5 most likely permutations
-    for (const guess of scoredPerms.slice(0, 5)) {
+    // Test the top 15 most likely permutations
+    for (const guess of scoredPerms.slice(0, 15)) {
       if (results.some((r) => r.email === guess.email)) continue;
 
       const validation = await validateEmail(guess.email);
