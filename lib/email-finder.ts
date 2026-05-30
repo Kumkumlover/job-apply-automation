@@ -546,6 +546,47 @@ export async function enrichAll(
   apolloKey: string
 ): Promise<PersonResult[]> {
   const results: PersonResult[] = [];
+
+  // 1. Group people by company
+  const companyGroups = new Map<string, PersonInput[]>();
+  for (const p of people) {
+    const comp = (p.company || "").trim().toLowerCase();
+    if (!comp) continue; // Skip grouping if no company
+    if (!companyGroups.has(comp)) companyGroups.set(comp, []);
+    companyGroups.get(comp)!.push(p);
+  }
+
+  // 2. Resolve domain for each company ONCE
+  for (const [comp, group] of companyGroups.entries()) {
+    // Check if any person in this group already has a domain provided
+    let sharedDomain = "";
+    for (const p of group) {
+      const extracted = extractDomain(p.domain ?? "");
+      if (extracted) {
+        sharedDomain = extracted;
+        break;
+      }
+    }
+
+    // If no one has a domain, guess it ONCE for the entire company
+    if (!sharedDomain && group.length > 0 && group[0].company) {
+      const guesses = await llmGuessDomains(group[0].company, "");
+      if (guesses.length > 0) {
+        sharedDomain = guesses[0];
+      }
+    }
+
+    // Assign the shared domain to all people in the group who don't have one
+    if (sharedDomain) {
+      for (const p of group) {
+        if (!extractDomain(p.domain ?? "")) {
+          p.domain = sharedDomain;
+        }
+      }
+    }
+  }
+
+  // 3. Process each person sequentially
   for (const person of people) {
     const result = await processPerson(person, hunterKey, apolloKey);
     results.push(result);
