@@ -372,13 +372,24 @@ async function processPerson(
 
   // 1. Check cache first
   const cached = await store.getCachedEmails(resolvedPerson.name, domain);
-  if (cached.length > 0) {
-    return formatOutput(resolvedPerson, cached.map((c) => ({
-      email: c.email,
-      type: (c.verified ? "verified" : c.source === "Pattern Engine" ? "predicted" : "discovered") as "verified" | "discovered" | "predicted",
-      confidence: c.confidence,
-      source: c.source,
-    })));
+  const hasVerified = cached.some((c) => c.verified);
+  const apiCalls = store.getApiCalls(domain);
+
+  // If we already have verified emails, or we maxed out API limits for this domain, return cache immediately
+  if (cached.length > 0 && (hasVerified || apiCalls >= 2)) {
+    return formatOutput(
+      resolvedPerson,
+      cached.map((c) => ({
+        email: c.email,
+        type: (c.verified
+          ? "verified"
+          : c.source === "Pattern Engine"
+            ? "predicted"
+            : "discovered") as "verified" | "discovered" | "predicted",
+        confidence: c.confidence,
+        source: c.source,
+      }))
+    );
   }
 
   const results: EmailResult[] = [];
@@ -397,8 +408,6 @@ async function processPerson(
   }
 
   // 2. API Lookups (max 2 per domain)
-  const apiCalls = store.getApiCalls(domain);
-
   if (apiCalls < 2) {
     // Try Hunter first
     const hunterResult = await hunterLookup(domain, first, last, hunterKey);
@@ -427,6 +436,23 @@ async function processPerson(
         ]);
       }
     }
+  }
+
+  // If API lookups failed but we had cached predictions, return them now to avoid regenerating
+  if (cached.length > 0) {
+    return formatOutput(
+      resolvedPerson,
+      cached.map((c) => ({
+        email: c.email,
+        type: (c.verified
+          ? "verified"
+          : c.source === "Pattern Engine"
+            ? "predicted"
+            : "discovered") as "verified" | "discovered" | "predicted",
+        confidence: c.confidence,
+        source: c.source,
+      }))
+    );
   }
 
   // 3. LLM Deep Search
