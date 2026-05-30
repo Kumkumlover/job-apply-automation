@@ -44,20 +44,63 @@ type Status = "idle" | "loading" | "success" | "error";
 
 export default function EmailFinderPage() {
   const [apiKeys, setApiKeys] = useState({ hunter: "", apollo: "" });
+  const [tempKeys, setTempKeys] = useState({ hunter: "", apollo: "" });
   const [showKeys, setShowKeys] = useState(false);
+  const [keyStatus, setKeyStatus] = useState({
+    hunter: "idle" as "idle" | "checking" | "valid" | "invalid",
+    apollo: "idle" as "idle" | "checking" | "valid" | "invalid",
+  });
+  const [keyError, setKeyError] = useState({ hunter: "", apollo: "" });
 
   // Load saved keys on mount
   useEffect(() => {
-    const savedHunter = localStorage.getItem("hunterKey");
-    const savedApollo = localStorage.getItem("apolloKey");
-    if (savedHunter || savedApollo) {
-      setApiKeys({ hunter: savedHunter || "", apollo: savedApollo || "" });
-    }
+    const savedHunter = localStorage.getItem("hunterKey") || "";
+    const savedApollo = localStorage.getItem("apolloKey") || "";
+    setApiKeys({ hunter: savedHunter, apollo: savedApollo });
+    setTempKeys({ hunter: savedHunter, apollo: savedApollo });
+    if (savedHunter) setKeyStatus((prev) => ({ ...prev, hunter: "valid" }));
+    if (savedApollo) setKeyStatus((prev) => ({ ...prev, apollo: "valid" }));
   }, []);
 
-  const handleKeyChange = (provider: "hunter" | "apollo", val: string) => {
-    setApiKeys((prev) => ({ ...prev, [provider]: val }));
-    localStorage.setItem(`${provider}Key`, val);
+  const handleTempKeyChange = (provider: "hunter" | "apollo", val: string) => {
+    setTempKeys((prev) => ({ ...prev, [provider]: val }));
+    setKeyStatus((prev) => ({ ...prev, [provider]: "idle" }));
+    setKeyError((prev) => ({ ...prev, [provider]: "" }));
+  };
+
+  const verifyKey = async (provider: "hunter" | "apollo") => {
+    const key = tempKeys[provider].trim();
+    if (!key) {
+      setApiKeys((prev) => ({ ...prev, [provider]: "" }));
+      localStorage.removeItem(`${provider}Key`);
+      setKeyStatus((prev) => ({ ...prev, [provider]: "idle" }));
+      return;
+    }
+
+    setKeyStatus((prev) => ({ ...prev, [provider]: "checking" }));
+    setKeyError((prev) => ({ ...prev, [provider]: "" }));
+
+    try {
+      const res = await fetch("/api/verify-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [`${provider}Key`]: key }),
+      });
+      const data = await res.json();
+
+      const providerData = data[provider];
+      if (providerData && providerData.valid) {
+        setKeyStatus((prev) => ({ ...prev, [provider]: "valid" }));
+        setApiKeys((prev) => ({ ...prev, [provider]: key }));
+        localStorage.setItem(`${provider}Key`, key);
+      } else {
+        setKeyStatus((prev) => ({ ...prev, [provider]: "invalid" }));
+        setKeyError((prev) => ({ ...prev, [provider]: "Invalid API key" }));
+      }
+    } catch (err: any) {
+      setKeyStatus((prev) => ({ ...prev, [provider]: "invalid" }));
+      setKeyError((prev) => ({ ...prev, [provider]: "Failed to verify key" }));
+    }
   };
   const [people, setPeople] = useState<PersonRow[]>([
     { id: Date.now(), name: "", company: "", domain: "" },
@@ -195,38 +238,68 @@ export default function EmailFinderPage() {
                   <span className="flex items-center gap-2">
                     <Key className="w-4 h-4 text-orange-400" /> Hunter.io API Key
                   </span>
-                  {apiKeys.hunter.length > 5 && (
+                  {keyStatus.hunter === "valid" && (
                     <span className="text-xs text-green-400 flex items-center gap-1">
                       <CheckCircle className="w-3 h-3" /> Saved & Active
                     </span>
                   )}
+                  {keyStatus.hunter === "invalid" && (
+                    <span className="text-xs text-red-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {keyError.hunter || "Invalid"}
+                    </span>
+                  )}
                 </label>
-                <input
-                  type="password"
-                  placeholder="Enter Hunter API key..."
-                  value={apiKeys.hunter}
-                  onChange={(e) => handleKeyChange("hunter", e.target.value)}
-                  className="w-full px-4 py-2.5 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 outline-none transition-all"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter Hunter API key..."
+                    value={tempKeys.hunter}
+                    onChange={(e) => handleTempKeyChange("hunter", e.target.value)}
+                    className={`flex-1 px-4 py-2.5 bg-[#0a0a0b] border ${keyStatus.hunter === 'invalid' ? 'border-red-500/50 focus:border-red-500 focus:ring-red-500/20' : keyStatus.hunter === 'valid' ? 'border-green-500/50' : 'border-[#2a2a30] focus:border-blue-500/40 focus:ring-blue-500/40'} rounded-lg text-white placeholder-slate-600 focus:ring-2 outline-none transition-all`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => verifyKey("hunter")}
+                    disabled={keyStatus.hunter === "checking" || tempKeys.hunter === apiKeys.hunter}
+                    className="px-4 py-2 bg-[#1e1e22] hover:bg-[#2a2a30] disabled:opacity-50 text-slate-300 rounded-lg transition-colors border border-[#2a2a30]"
+                  >
+                    {keyStatus.hunter === "checking" ? "Verifying..." : "Verify & Save"}
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-400 flex items-center justify-between">
                   <span className="flex items-center gap-2">
                     <Key className="w-4 h-4 text-indigo-400" /> Apollo.io API Key
                   </span>
-                  {apiKeys.apollo.length > 5 && (
+                  {keyStatus.apollo === "valid" && (
                     <span className="text-xs text-green-400 flex items-center gap-1">
                       <CheckCircle className="w-3 h-3" /> Saved & Active
                     </span>
                   )}
+                  {keyStatus.apollo === "invalid" && (
+                    <span className="text-xs text-red-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {keyError.apollo || "Invalid"}
+                    </span>
+                  )}
                 </label>
-                <input
-                  type="password"
-                  placeholder="Enter Apollo API key..."
-                  value={apiKeys.apollo}
-                  onChange={(e) => handleKeyChange("apollo", e.target.value)}
-                  className="w-full px-4 py-2.5 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 outline-none transition-all"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter Apollo API key..."
+                    value={tempKeys.apollo}
+                    onChange={(e) => handleTempKeyChange("apollo", e.target.value)}
+                    className={`flex-1 px-4 py-2.5 bg-[#0a0a0b] border ${keyStatus.apollo === 'invalid' ? 'border-red-500/50 focus:border-red-500 focus:ring-red-500/20' : keyStatus.apollo === 'valid' ? 'border-green-500/50' : 'border-[#2a2a30] focus:border-blue-500/40 focus:ring-blue-500/40'} rounded-lg text-white placeholder-slate-600 focus:ring-2 outline-none transition-all`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => verifyKey("apollo")}
+                    disabled={keyStatus.apollo === "checking" || tempKeys.apollo === apiKeys.apollo}
+                    className="px-4 py-2 bg-[#1e1e22] hover:bg-[#2a2a30] disabled:opacity-50 text-slate-300 rounded-lg transition-colors border border-[#2a2a30]"
+                  >
+                    {keyStatus.apollo === "checking" ? "Verifying..." : "Verify & Save"}
+                  </button>
+                </div>
               </div>
               <p className="col-span-full text-xs text-slate-600">
                 Keys are sent via headers and never stored. Without keys, only
