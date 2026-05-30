@@ -270,7 +270,12 @@ async function hunterLookup(
       api_key: apiKey,
     });
 
-    const res = await fetch(`https://api.hunter.io/v2/email-finder?${params}`);
+    const res = await fetch(`https://api.hunter.io/v2/email-finder?${params}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+      }
+    });
     console.log(`Hunter lookup for ${domain}: status ${res.status}`);
     
     if (!res.ok) {
@@ -300,7 +305,11 @@ async function apolloLookup(
   try {
     const res = await fetch("https://api.apollo.io/v1/people/match", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+      headers: { 
+        "Content-Type": "application/json", 
+        "Cache-Control": "no-cache",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      },
       body: JSON.stringify({
         api_key: apiKey,
         name,
