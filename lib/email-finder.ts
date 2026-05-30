@@ -14,6 +14,7 @@
  */
 
 import { validateEmail } from "./pipeline/validate";
+import { generatePermutations } from "./permutator";
 import { store, type PatternRecord, type CachedEmail } from "./intelligence-store";
 import { ask, askJSON } from "./llm";
 
