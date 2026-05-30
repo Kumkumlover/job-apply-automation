@@ -14,9 +14,9 @@ export async function POST(req: NextRequest) {
 
     // Extract API keys from headers (or body fallback)
     const hunterKey =
-      req.headers.get("x-hunter-key") ?? body.hunterKey ?? "";
+      (req.headers.get("x-hunter-key") ?? body.hunterKey ?? "").trim();
     const apolloKey =
-      req.headers.get("x-apollo-key") ?? body.apolloKey ?? "";
+      (req.headers.get("x-apollo-key") ?? body.apolloKey ?? "").trim();
 
     // Validate input
     const people: PersonInput[] = Array.isArray(body.people)
