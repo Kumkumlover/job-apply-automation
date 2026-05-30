@@ -361,7 +361,8 @@ function extractDomain(input: string): string {
 async function processPerson(
   person: PersonInput,
   hunterKey: string,
-  apolloKey: string
+  apolloKey: string,
+  preFetchedResults?: Map<string, any>
 ): Promise<PersonResult> {
   const { first, last } = parseName(person.name);
   let domain = extractDomain(person.domain ?? "");
@@ -420,31 +421,36 @@ async function processPerson(
   }
 
   // 2. API Lookups (max 2 per domain)
-  if (apiCalls < 2) {
-    // Try Hunter first
-    const hunterResult = await hunterLookup(domain, first, last, hunterKey);
-    if (hunterResult) {
-      const pattern = extractPattern(first, last, hunterResult.email.split("@")[0]);
-      await store.saveEmail(hunterResult.email, resolvedPerson.name, domain, pattern, 0.95, hunterResult.source, true);
+  if (domain && hunterKey) {
+    const cacheKey = `${resolvedPerson.name}-${domain}`;
+    let hunterData = preFetchedResults?.get(cacheKey);
+    
+    if (!hunterData) {
+      hunterData = await hunterLookup(domain, first, last, hunterKey);
+    }
+
+    if (hunterData) {
+      const pattern = extractPattern(first, last, hunterData.email.split("@")[0]);
+      await store.saveEmail(hunterData.email, resolvedPerson.name, domain, pattern, 0.95, hunterData.source, true);
       await store.recordPatternSuccess(pattern, domain);
 
       return formatOutput(resolvedPerson, [
-        { email: hunterResult.email, type: "verified", confidence: 0.95, source: hunterResult.source },
+        { email: hunterData.email, type: "verified", confidence: 0.95, source: hunterData.source },
       ]);
     }
+  }
 
+  if (apiCalls < 2) {
     // Try Apollo
-    if (apiCalls < 2) {
-      const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
-      if (apolloResult) {
-        const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
-        await store.saveEmail(apolloResult.email, resolvedPerson.name, domain, pattern, 0.85, apolloResult.source, false);
-        await store.recordPatternSuccess(pattern, domain);
+    const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
+    if (apolloResult) {
+      const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
+      await store.saveEmail(apolloResult.email, resolvedPerson.name, domain, pattern, 0.85, apolloResult.source, false);
+      await store.recordPatternSuccess(pattern, domain);
 
-        return formatOutput(resolvedPerson, [
-          { email: apolloResult.email, type: "discovered", confidence: 0.85, source: apolloResult.source },
-        ]);
-      }
+      return formatOutput(resolvedPerson, [
+        { email: apolloResult.email, type: "discovered", confidence: 0.85, source: apolloResult.source },
+      ]);
     }
   }
 
@@ -544,6 +550,7 @@ export async function enrichAll(
   apolloKey: string
 ): Promise<PersonResult[]> {
   const results: PersonResult[] = [];
+  const preFetchedResults = new Map<string, any>();
 
   // 1. Group people by company
   const companyGroups = new Map<string, PersonInput[]>();
@@ -569,7 +576,31 @@ export async function enrichAll(
     // If no one has a domain, guess it ONCE for the entire company
     if (!sharedDomain && group.length > 0 && group[0].company) {
       const guesses = await llmGuessDomains(group[0].company, "");
-      if (guesses.length > 0) {
+      
+      let verifiedDomain = "";
+      
+      // Try each guessed domain against each person in the group until we find a match
+      for (const guess of guesses) {
+        for (const person of group) {
+          const fName = person.name.split(" ")[0] || "";
+          const lName = person.name.split(" ").slice(1).join(" ") || "";
+          
+          if (fName && lName) {
+            const hunterResult = await hunterLookup(guess, fName, lName, hunterKey);
+            if (hunterResult) {
+              verifiedDomain = guess;
+              // Cache this specific person's result so processPerson can use it instantly later
+              preFetchedResults.set(`${person.name}-${guess}`, hunterResult);
+              break;
+            }
+          }
+        }
+        if (verifiedDomain) break;
+      }
+
+      if (verifiedDomain) {
+        sharedDomain = verifiedDomain;
+      } else if (guesses.length > 0) {
         sharedDomain = guesses[0];
       }
     }
@@ -584,10 +615,10 @@ export async function enrichAll(
     }
   }
 
-  // 3. Process each person sequentially
+  // 3. Process each person individually now that domains are resolved
   for (const person of people) {
-    const result = await processPerson(person, hunterKey, apolloKey);
-    results.push(result);
+    const p = await processPerson(person, hunterKey, apolloKey, preFetchedResults);
+    results.push(p);
   }
   return results;
 }
