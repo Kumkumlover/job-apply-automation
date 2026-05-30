@@ -466,7 +466,7 @@ Common patterns: first.last, firstinitial+last, etc. Return ONLY a JSON array of
       const validation = await validateEmail(guess);
       const isEmailValid = validation.mx_ok && validation.domain_ok;
       const pattern = extractPattern(first, last, guess.split("@")[0]);
-      await store.saveEmail(guess, resolvedPerson.name, domain, pattern, isEmailValid ? 0.95 : 0.53, "LLM Deep Search", isEmailValid);
+      await store.saveEmail(guess, resolvedPerson.name, domain, pattern, isEmailValid ? 0.95 : 0.53, "LLM Deep Search", false);
 
       results.push({
         email: guess,
