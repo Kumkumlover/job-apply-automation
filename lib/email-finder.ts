@@ -15,6 +15,7 @@
 
 import { validateEmail } from "./pipeline/validate";
 import { generatePermutations } from "./permutator";
+import { resolveMxSafe } from "./dns-utils";
 import { store, type PatternRecord, type CachedEmail } from "./intelligence-store";
 import { ask, askJSON } from "./llm";
 
@@ -601,7 +602,16 @@ export async function enrichAll(
       if (verifiedDomain) {
         sharedDomain = verifiedDomain;
       } else if (guesses.length > 0) {
-        sharedDomain = guesses[0];
+        // If Hunter failed, don't blindly pick guesses[0]. Verify MX records!
+        let validFallback = "";
+        for (const guess of guesses) {
+          const mx = await resolveMxSafe(guess);
+          if (mx && mx.length > 0) {
+            validFallback = guess;
+            break;
+          }
+        }
+        sharedDomain = validFallback || guesses[0];
       }
     }
 
