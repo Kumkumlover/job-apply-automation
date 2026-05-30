@@ -18,6 +18,9 @@ export async function POST(req: NextRequest) {
     const apolloKey =
       (req.headers.get("x-apollo-key") ?? body.apolloKey ?? "").trim();
 
+    console.log("Headers received:", Object.fromEntries(req.headers.entries()));
+    console.log("Extracted hunterKey length:", hunterKey.length);
+
     // Validate input
     const people: PersonInput[] = Array.isArray(body.people)
       ? body.people
