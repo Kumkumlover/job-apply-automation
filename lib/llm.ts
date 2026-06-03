@@ -81,7 +81,7 @@ export async function ask(prompt: string, model?: string): Promise<string> {
     model: m,
     messages: [{ role: "user", content: prompt }],
     temperature: 0.0,
-  });
+  }, { timeout: 10000 });
 
   return response.choices[0]?.message?.content ?? "";
 }

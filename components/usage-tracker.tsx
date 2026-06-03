@@ -29,7 +29,7 @@ interface UsageTrackerProps {
 export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerProps) {
   const [globalUsage, setGlobalUsage] = useState<GlobalUsage | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
 
   const fetchGlobalUsage = async () => {
     if (!hunterKey && !apolloKey) return;
