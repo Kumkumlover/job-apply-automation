@@ -57,10 +57,8 @@ export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerP
     fetchGlobalUsage();
   }, [hunterKey, apolloKey]);
 
-  // If no keys are provided and no local usage, don't show the widget
-  if (!hunterKey && !apolloKey && localUsage.search === 0 && localUsage.apollo === 0 && localUsage.hunter === 0) {
-    return null;
-  }
+  // Always show the widget toggle so the user knows they need to input keys
+
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 font-sans">

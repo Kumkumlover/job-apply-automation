@@ -31,7 +31,7 @@ function getDefaultModel(provider: Provider): string {
   switch (provider) {
     case "groq":   return "llama-3.3-70b-versatile";
     case "ollama": return process.env.OLLAMA_MODEL ?? "llama3.2";
-    case "gemini": return "gemini-3.5-flash";
+    case "gemini": return "gemini-1.5-flash";
   }
 }
 
@@ -80,7 +80,7 @@ export async function ask(prompt: string, model?: string): Promise<string> {
   const response = await client.chat.completions.create({
     model: m,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
+    temperature: 0.0,
   });
 
   return response.choices[0]?.message?.content ?? "";

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   try {
     const hunterKey = req.headers.get("x-hunter-key") || req.nextUrl.searchParams.get("hunterKey");
