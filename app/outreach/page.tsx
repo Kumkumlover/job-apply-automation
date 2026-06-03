@@ -22,7 +22,10 @@ import {
   Settings,
   Target,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { UsageTracker, type LocalUsage } from "@/components/usage-tracker";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -33,6 +36,7 @@ interface RankedCandidate {
   role_type: "hiring_manager" | "team_lead" | "recruiter_hr" | "other";
   confidence: number;
   reason: string;
+  email?: string;
 }
 
 interface EmailData {
@@ -52,6 +56,7 @@ interface PersonResult {
 
 interface EmailDraft {
   toEmail: string;
+  bccEmails?: string;
   toName: string;
   subject: string;
   htmlBody: string;
@@ -81,9 +86,9 @@ function roleTypeColor(rt: string) {
   }
 }
 
-function buildGmailDraftUrl(to: string, subject: string, htmlBody: string): string {
+function buildGmailDraftUrl(draft: EmailDraft): string {
   // Convert HTML to plain text for Gmail compose
-  const plainBody = htmlBody
+  const plainBody = draft.htmlBody
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<\/li>/gi, "\n")
@@ -101,10 +106,15 @@ function buildGmailDraftUrl(to: string, subject: string, htmlBody: string): stri
 
   const params = new URLSearchParams({
     view: "cm",
-    to,
-    su: subject,
+    fs: "1",
+    to: draft.toEmail,
+    su: draft.subject,
     body: plainBody,
   });
+
+  if (draft.bccEmails) {
+    params.append("bcc", draft.bccEmails);
+  }
 
   return `https://mail.google.com/mail/?${params.toString()}`;
 }
@@ -115,6 +125,7 @@ export default function OutreachPage() {
   // Step state
   const [step, setStep] = useState<Step>(1);
   const [phaseStatus, setPhaseStatus] = useState<PhaseStatus>("idle");
+  const [loadingAction, setLoadingAction] = useState<"contacts" | "cycle" | "emails" | "drafts" | null>(null);
   const [error, setError] = useState("");
 
   // API Keys
@@ -143,22 +154,103 @@ export default function OutreachPage() {
   const [sendStatus, setSendStatus] = useState<Map<string, "idle" | "sending" | "sent" | "error">>(new Map());
   const [copied, setCopied] = useState<string | null>(null);
 
-  // Load saved keys on mount
+  // Live API Usage Tracker State
+  const [localUsage, setLocalUsage] = useState<LocalUsage>({ search: 0, apollo: 0, hunter: 0 });
+
+  // Load saved state on mount
   useEffect(() => {
-    const savedHunter = localStorage.getItem("hunterKey") || "";
-    const savedApollo = localStorage.getItem("apolloKey") || "";
-    setApiKeys({ hunter: savedHunter, apollo: savedApollo });
+    setApiKeys({
+      hunter: localStorage.getItem("hunterKey") || "",
+      apollo: localStorage.getItem("apolloKey") || "",
+    });
+
+    const savedCompany = localStorage.getItem("outreach_company");
+    if (savedCompany) setCompany(savedCompany);
+    const savedJobTitle = localStorage.getItem("outreach_jobTitle");
+    if (savedJobTitle) setJobTitle(savedJobTitle);
+    const savedJd = localStorage.getItem("outreach_jd");
+    if (savedJd) setJd(savedJd);
+    const savedCompanyWebsite = localStorage.getItem("outreach_companyWebsite");
+    if (savedCompanyWebsite) setCompanyWebsite(savedCompanyWebsite);
+
+    const savedCandidates = localStorage.getItem("outreach_candidates");
+    if (savedCandidates) setCandidates(JSON.parse(savedCandidates));
+    const savedSelectedContacts = localStorage.getItem("outreach_selectedContacts");
+    if (savedSelectedContacts) setSelectedContacts(new Set(JSON.parse(savedSelectedContacts)));
+    
+    const savedEmailResults = localStorage.getItem("outreach_emailResults");
+    if (savedEmailResults) setEmailResults(JSON.parse(savedEmailResults));
+    const savedSelectedEmails = localStorage.getItem("outreach_selectedEmails");
+    if (savedSelectedEmails) setSelectedEmails(new Map(JSON.parse(savedSelectedEmails)));
+    
+    const savedDrafts = localStorage.getItem("outreach_drafts");
+    if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
+    const savedStep = localStorage.getItem("outreach_step");
+    if (savedStep) setStep(Number(savedStep) as Step);
   }, []);
+
+  // Save state on change
+  useEffect(() => {
+    localStorage.setItem("outreach_company", company);
+    localStorage.setItem("outreach_jobTitle", jobTitle);
+    localStorage.setItem("outreach_jd", jd);
+    localStorage.setItem("outreach_companyWebsite", companyWebsite);
+    localStorage.setItem("outreach_candidates", JSON.stringify(candidates));
+    localStorage.setItem("outreach_selectedContacts", JSON.stringify(Array.from(selectedContacts)));
+    localStorage.setItem("outreach_emailResults", JSON.stringify(emailResults));
+    localStorage.setItem("outreach_selectedEmails", JSON.stringify(Array.from(selectedEmails.entries())));
+    localStorage.setItem("outreach_drafts", JSON.stringify(drafts));
+    localStorage.setItem("outreach_step", String(step));
+  }, [company, jobTitle, jd, companyWebsite, candidates, selectedContacts, emailResults, selectedEmails, drafts, step]);
+
+  const handleReset = () => {
+    if (!window.confirm("Are you sure you want to start over? This will clear your current candidates and progress.")) return;
+    setCompany("");
+    setJobTitle("");
+    setJd("");
+    setCompanyWebsite("");
+    setCandidates([]);
+    setSelectedContacts(new Set());
+    setEmailResults([]);
+    setSelectedEmails(new Map());
+    setDrafts([]);
+    setEditingDraftIdx(null);
+    setEditSubject("");
+    setEditBody("");
+    setStep(1);
+    setPhaseStatus("idle");
+    setError("");
+    setLocalUsage({ search: 0, apollo: 0, hunter: 0 });
+    localStorage.removeItem("outreach_company");
+    localStorage.removeItem("outreach_jobTitle");
+    localStorage.removeItem("outreach_jd");
+    localStorage.removeItem("outreach_companyWebsite");
+    localStorage.removeItem("outreach_candidates");
+    localStorage.removeItem("outreach_selectedContacts");
+    localStorage.removeItem("outreach_emailResults");
+    localStorage.removeItem("outreach_selectedEmails");
+    localStorage.removeItem("outreach_drafts");
+    localStorage.removeItem("outreach_step");
+  };
 
   // ── Step 1: Find Contacts ──
 
-  const handleFindContacts = async () => {
+  const handleFindContacts = async (isCycle = false) => {
     if (!company.trim() || !jobTitle.trim()) {
       setError("Please enter both Company and Job Title.");
       return;
     }
 
+    const keptCandidates = isCycle 
+      ? candidates.filter((_, i) => selectedContacts.has(i))
+      : [];
+      
+    const excludeNames = isCycle
+      ? candidates.map(c => c.name)
+      : [];
+
     setPhaseStatus("loading");
+    setLoadingAction(isCycle ? "cycle" : "contacts");
     setError("");
 
     try {
@@ -170,6 +262,7 @@ export default function OutreachPage() {
           company: company.trim(),
           jobTitle: jobTitle.trim(),
           jd: jd.trim() || undefined,
+          excludeNames,
         }),
       });
 
@@ -179,16 +272,33 @@ export default function OutreachPage() {
       }
 
       const data = await res.json();
-      const ranked = data.rankedCandidates || [];
-      setCandidates(ranked);
+      const newRanked = data.rankedCandidates || [];
+      const combinedCandidates = [...keptCandidates, ...newRanked];
+
+      // Update local usage safely
+      if (data.localApiUsage) {
+        setLocalUsage((prev) => ({
+          ...prev,
+          search: prev.search + (data.localApiUsage.search || 0),
+        }));
+      }
+
+      setCandidates(combinedCandidates);
 
       // Auto-select all
-      setSelectedContacts(new Set(ranked.map((_: RankedCandidate, i: number) => i)));
+      setSelectedContacts(new Set(combinedCandidates.map((_: RankedCandidate, i: number) => i)));
+      
+      // Clear stale downstream states
+      setEmailResults([]);
+      setSelectedEmails(new Map());
+      setDrafts([]);
+      
       setStep(2);
       setPhaseStatus("success");
     } catch (err) {
       setError((err as Error).message);
       setPhaseStatus("error");
+      setLoadingAction(null);
     }
   };
 
@@ -202,44 +312,79 @@ export default function OutreachPage() {
     }
 
     setPhaseStatus("loading");
+    setLoadingAction("emails");
     setError("");
+    setEmailResults([]);
+    setSelectedEmails(new Map());
 
     try {
       const contacts = selected.map((c) => ({
         name: c.name,
         company: company.trim(),
         domain: companyWebsite.trim() || "",
+        email: c.email,
       }));
 
-      const res = await fetch("/api/outreach", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Hunter-Key": apiKeys.hunter,
-          "X-Apollo-Key": apiKeys.apollo,
-        },
-        body: JSON.stringify({
-          action: "find-emails",
-          contacts,
-          hunterKey: apiKeys.hunter,
-          apolloKey: apiKeys.apollo,
-        }),
-      });
+      const allResults: PersonResult[] = [];
+      const autoSelect = new Map<string, string>();
 
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `Server error: ${res.status}`);
+      // Process sequentially on frontend to avoid Vercel 10s timeout
+      for (const contact of contacts) {
+        const res = await fetch("/api/outreach", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Hunter-Key": apiKeys.hunter,
+            "X-Apollo-Key": apiKeys.apollo,
+          },
+          body: JSON.stringify({
+            action: "find-emails",
+            contacts: [contact],
+            hunterKey: apiKeys.hunter,
+            apolloKey: apiKeys.apollo,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error(`Failed to find email for ${contact.name}`);
+          continue;
+        }
+
+        const data = await res.json();
+        
+        if (data.localApiUsage) {
+          setLocalUsage((prev) => ({
+            ...prev,
+            apollo: prev.apollo + (data.localApiUsage.apollo || 0),
+            hunter: prev.hunter + (data.localApiUsage.hunter || 0),
+          }));
+        }
+
+        const results: PersonResult[] = data.emailResults || [];
+        allResults.push(...results);
       }
 
-      const data = await res.json();
-      const results: PersonResult[] = data.emailResults || [];
-      setEmailResults(results);
+      if (allResults.length === 0) {
+        throw new Error("Failed to find any emails. Please try again.");
+      }
+
+      setEmailResults(allResults);
 
       // Auto-select recommended emails
-      const autoSelect = new Map<string, string>();
-      for (const r of results) {
-        if (r.recommended) autoSelect.set(r.name, r.recommended);
-        else if (r.emails.length > 0) autoSelect.set(r.name, r.emails[0].email);
+      for (const r of allResults) {
+        if (r.recommended) {
+          const recommendedInfo = r.emails.find((e) => e.email === r.recommended);
+          if (recommendedInfo?.type === "predicted") {
+            const allPredicted = r.emails
+              .filter((e) => e.type === "predicted")
+              .map((e) => e.email);
+            autoSelect.set(r.name, allPredicted.join("|"));
+          } else {
+            autoSelect.set(r.name, r.recommended);
+          }
+        } else if (r.emails.length > 0) {
+          autoSelect.set(r.name, r.emails[0].email);
+        }
       }
       setSelectedEmails(autoSelect);
 
@@ -248,6 +393,7 @@ export default function OutreachPage() {
     } catch (err) {
       setError((err as Error).message);
       setPhaseStatus("error");
+      setLoadingAction(null);
     }
   };
 
@@ -261,12 +407,18 @@ export default function OutreachPage() {
     }
 
     setPhaseStatus("loading");
+    setLoadingAction("drafts");
     setError("");
 
     try {
       const newDrafts: EmailDraft[] = [];
 
-      for (const [name, email] of targets) {
+      for (const [name, emailsStr] of targets) {
+        // Parse the primary and BCC emails
+        const emailParts = emailsStr.split("|");
+        const primaryEmail = emailParts[0];
+        const bccEmails = emailParts.length > 1 ? emailParts.slice(1).join(", ") : undefined;
+
         const res = await fetch("/api/outreach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -283,7 +435,8 @@ export default function OutreachPage() {
 
         const data = await res.json();
         newDrafts.push({
-          toEmail: email,
+          toEmail: primaryEmail,
+          bccEmails,
           toName: name,
           subject: data.subject,
           htmlBody: data.htmlBody,
@@ -295,9 +448,11 @@ export default function OutreachPage() {
       setSendStatus(new Map(newDrafts.map((d) => [d.toEmail, "idle"])));
       setStep(4);
       setPhaseStatus("success");
+      setLoadingAction(null);
     } catch (err) {
       setError((err as Error).message);
       setPhaseStatus("error");
+      setLoadingAction(null);
     }
   };
 
@@ -377,38 +532,46 @@ export default function OutreachPage() {
           </p>
         </header>
 
-        {/* Step Progress */}
-        <div className="flex items-center gap-2 bg-[#111113] rounded-xl border border-[#1e1e22] p-4">
-          {steps.map((s, idx) => (
-            <React.Fragment key={s.num}>
-              <button
-                onClick={() => {
-                  if (s.num < step) setStep(s.num as Step);
-                }}
-                disabled={s.num > step}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                  s.num === step
-                    ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
-                    : s.num < step
-                      ? "bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 cursor-pointer hover:bg-emerald-600/20"
-                      : "bg-[#0a0a0b] text-slate-600 border border-[#1e1e22] cursor-not-allowed"
-                }`}
-              >
-                {s.num < step ? (
-                  <CheckCircle className="w-4 h-4" />
-                ) : (
-                  <s.icon className="w-4 h-4" />
+        {/* Step Navigation & Reset */}
+        <div className="flex items-center justify-between pb-4 border-b border-[#1e1e22]">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+            {steps.map((s, idx) => (
+              <React.Fragment key={s.num}>
+                <button
+                  disabled={s.num > step}
+                  onClick={() => setStep(s.num as Step)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    s.num === step
+                      ? "bg-indigo-500/20 text-indigo-400"
+                      : s.num < step
+                      ? "text-emerald-400 hover:bg-[#1e1e22]"
+                      : "text-slate-600 opacity-50 cursor-not-allowed"
+                  }`}
+                >
+                  {s.num < step ? (
+                    <CheckCircle className="w-4 h-4" />
+                  ) : (
+                    <s.icon className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">{s.label}</span>
+                  <span className="sm:hidden">{s.num}</span>
+                </button>
+                {idx < steps.length - 1 && (
+                  <ChevronRight className="w-4 h-4 text-slate-600 flex-shrink-0" />
                 )}
-                <span className="hidden sm:inline">{s.label}</span>
-                <span className="sm:hidden">{s.num}</span>
-              </button>
-              {idx < steps.length - 1 && (
-                <ChevronRight className="w-4 h-4 text-slate-600 flex-shrink-0" />
-              )}
-            </React.Fragment>
-          ))}
+              </React.Fragment>
+            ))}
+          </div>
+          {step > 1 && (
+            <button
+              onClick={handleReset}
+              className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 flex-shrink-0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              <span className="hidden sm:inline">Start Over</span>
+            </button>
+          )}
         </div>
-
         {/* API Keys Panel */}
         <div className="bg-[#111113] rounded-xl border border-[#1e1e22] overflow-hidden">
           <button
@@ -531,11 +694,11 @@ export default function OutreachPage() {
             </div>
 
             <button
-              onClick={handleFindContacts}
+              onClick={() => handleFindContacts(false)}
               disabled={phaseStatus === "loading" || !company.trim() || !jobTitle.trim()}
               className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-40 flex items-center justify-center gap-3 active:scale-[0.99]"
             >
-              {phaseStatus === "loading" ? (
+              {phaseStatus === "loading" && loadingAction === "contacts" ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <Search className="w-5 h-5" />
@@ -618,20 +781,35 @@ export default function OutreachPage() {
                 ))}
               </div>
 
-              <button
-                onClick={handleFindEmails}
-                disabled={phaseStatus === "loading" || selectedContacts.size === 0}
-                className="w-full mt-6 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-40 flex items-center justify-center gap-3"
-              >
-                {phaseStatus === "loading" ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Mail className="w-5 h-5" />
-                )}
-                {phaseStatus === "loading"
-                  ? "Finding Emails..."
-                  : `Find Emails for ${selectedContacts.size} Contact${selectedContacts.size !== 1 ? "s" : ""}`}
-              </button>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => handleFindContacts(true)}
+                  disabled={phaseStatus === "loading"}
+                  className="w-1/3 py-4 bg-[#2a2a30] hover:bg-[#3a3a40] text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-40 flex items-center justify-center gap-3"
+                >
+                  {phaseStatus === "loading" && loadingAction === "cycle" ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Search className="w-5 h-5" />
+                  )}
+                  Cycle / Find More
+                </button>
+
+                <button
+                  onClick={handleFindEmails}
+                  disabled={phaseStatus === "loading" || selectedContacts.size === 0}
+                  className="w-2/3 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-40 flex items-center justify-center gap-3"
+                >
+                  {phaseStatus === "loading" && loadingAction === "emails" ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Mail className="w-5 h-5" />
+                  )}
+                  {phaseStatus === "loading" && loadingAction === "emails"
+                    ? "Finding Emails..."
+                    : `Find Emails for ${selectedContacts.size} Contact${selectedContacts.size !== 1 ? "s" : ""}`}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -673,11 +851,15 @@ export default function OutreachPage() {
                       <p className="text-xs text-slate-500 italic">No emails found</p>
                     ) : (
                       <div className="space-y-2">
-                        {person.emails.map((em, eIdx) => (
+                        {person.emails.map((em, eIdx) => {
+                          const isSelectedPrimary = selectedEmails.get(person.name)?.split("|")[0] === em.email;
+                          const isSelectedBcc = selectedEmails.get(person.name)?.split("|").slice(1).includes(em.email);
+                          
+                          return (
                           <label
                             key={eIdx}
                             className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                              selectedEmails.get(person.name) === em.email
+                              isSelectedPrimary || isSelectedBcc
                                 ? "bg-blue-600/10 border-blue-500/30"
                                 : "border-[#1e1e22] hover:border-[#2a2a30]"
                             }`}
@@ -685,10 +867,11 @@ export default function OutreachPage() {
                             <input
                               type="radio"
                               name={`email-${person.name}`}
-                              checked={selectedEmails.get(person.name) === em.email}
-                              onChange={() =>
-                                setSelectedEmails((prev) => new Map(prev).set(person.name, em.email))
-                              }
+                              checked={isSelectedPrimary}
+                              onChange={() => {
+                                // If they manually click, we just set this one as the sole primary (no BCCs for manual clicks)
+                                setSelectedEmails((prev) => new Map(prev).set(person.name, em.email));
+                              }}
                               className="accent-blue-500"
                             />
                             <div className="flex-grow min-w-0">
@@ -696,6 +879,11 @@ export default function OutreachPage() {
                                 {em.email}
                               </span>
                               <div className="flex items-center gap-2 mt-1">
+                                {isSelectedBcc && (
+                                  <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                                    BCC FALLBACK
+                                  </span>
+                                )}
                                 <span
                                   className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded ${
                                     em.type === "verified"
@@ -713,7 +901,8 @@ export default function OutreachPage() {
                               </div>
                             </div>
                           </label>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -725,12 +914,12 @@ export default function OutreachPage() {
                 disabled={phaseStatus === "loading" || selectedEmails.size === 0}
                 className="w-full mt-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 disabled:opacity-40 flex items-center justify-center gap-3"
               >
-                {phaseStatus === "loading" ? (
+                {phaseStatus === "loading" && loadingAction === "drafts" ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <Sparkles className="w-5 h-5" />
                 )}
-                {phaseStatus === "loading"
+                {phaseStatus === "loading" && loadingAction === "drafts"
                   ? "Generating Personalized Emails..."
                   : `Generate Outreach for ${selectedEmails.size} Contact${selectedEmails.size !== 1 ? "s" : ""}`}
               </button>
@@ -863,7 +1052,7 @@ export default function OutreachPage() {
 
                         {/* Open in Gmail Draft */}
                         <a
-                          href={buildGmailDraftUrl(draft.toEmail, draft.subject, draft.htmlBody)}
+                          href={buildGmailDraftUrl(draft)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-4 py-2.5 bg-[#1e1e22] hover:bg-[#2a2a30] text-slate-300 text-sm rounded-lg border border-[#2a2a30] transition-all"
@@ -939,6 +1128,8 @@ export default function OutreachPage() {
           Outreach Automation · Part of Job Outreach Suite
         </footer>
       </div>
+
+      <UsageTracker localUsage={localUsage} hunterKey={apiKeys.hunter} apolloKey={apiKeys.apollo} />
     </main>
   );
 }
