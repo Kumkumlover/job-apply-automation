@@ -132,6 +132,8 @@ export default function OutreachPage() {
   const [apiKeys, setApiKeys] = useState({ hunter: "", apollo: "" });
   const [showKeys, setShowKeys] = useState(false);
 
+  const [isMounted, setIsMounted] = useState(false);
+
   // Step 1: Input
   const [company, setCompany] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -159,6 +161,7 @@ export default function OutreachPage() {
 
   // Load saved state on mount
   useEffect(() => {
+    setIsMounted(true);
     setApiKeys({
       hunter: localStorage.getItem("hunterKey") || "",
       apollo: localStorage.getItem("apolloKey") || "",
@@ -1129,7 +1132,7 @@ export default function OutreachPage() {
         </footer>
       </div>
 
-      <UsageTracker localUsage={localUsage} hunterKey={apiKeys.hunter} apolloKey={apiKeys.apollo} />
+      {isMounted && <UsageTracker localUsage={localUsage} hunterKey={apiKeys.hunter} apolloKey={apiKeys.apollo} />}
     </main>
   );
 }
