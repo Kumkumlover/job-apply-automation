@@ -9,7 +9,8 @@ function extractDepartmentKeywords(jobTitle: string): string {
   let dept = jobTitle.toLowerCase();
   const generic = [
     "product", "manager", "intern", "engineer", "developer", "software",
-    "senior", "junior", "lead", "director", "head", "vp", "chief", "associate", "staff", "principal"
+    "senior", "junior", "lead", "director", "head", "vp", "chief", "associate", "staff", "principal",
+    "assistant", "executive", "specialist", "coordinator", "officer", "analyst", "consultant", "vice", "president"
   ];
   for (const g of generic) {
     dept = dept.replace(new RegExp(`\\b${g}\\b`, "gi"), "");
