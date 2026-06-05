@@ -1,219 +1,251 @@
-/**
- * Phase 2a: Google Custom Search → parse + score candidates
- *
- * Replaces 3 n8n nodes: Query, HTTP Request, Parse Search Results + Code in JavaScript
- */
-
 import type { SearchResult } from "../types";
 import { askJSON } from "../llm";
+import { search as ddgSearch } from "duck-duck-scrape";
 
-const CSE_KEY = process.env.GOOGLE_CSE_KEY ?? "";
-const CSE_CX = process.env.GOOGLE_CSE_CX ?? "";
-
-/** Build a dynamic LinkedIn search query based on company + job title */
-function buildQuery(company: string, jobTitle: string): string {
-  // Extract role keywords from job_title for broader matching
-  const title = jobTitle.toLowerCase();
-  const roleVariants: string[] = [];
-
-  if (title.includes("product")) {
-    roleVariants.push(
-      '"product manager"','"product lead"','"head of product"',
-      '"senior product"','"director of product"','"product owner"'
-    );
-  } else if (title.includes("engineer") || title.includes("developer")) {
-    roleVariants.push(
-      `"${jobTitle}"`,'"engineering manager"','"tech lead"',
-      '"head of engineering"','"CTO"'
-    );
-  } else if (title.includes("design")) {
-    roleVariants.push(
-      `"${jobTitle}"`,'"design lead"','"head of design"',
-      '"design manager"','"UX lead"'
-    );
-  } else if (title.includes("market")) {
-    roleVariants.push(
-      `"${jobTitle}"`,'"marketing manager"','"head of marketing"',
-      '"CMO"','"growth lead"'
-    );
-  } else {
-    // Generic: search for the exact title + manager/lead/head variants
-    roleVariants.push(
-      `"${jobTitle}"`,
-      `"${jobTitle.replace(/\b(manager|lead|head)\b/gi, "").trim()} manager"`,
-      `"head of ${jobTitle.replace(/\b(manager|lead|head|senior|junior)\b/gi, "").trim()}"`,
-    );
+/** 
+ * Extract core department/domain keywords from a job title 
+ */
+function extractDepartmentKeywords(jobTitle: string): string {
+  let dept = jobTitle.toLowerCase();
+  const generic = [
+    "product", "manager", "intern", "engineer", "developer", "software",
+    "senior", "junior", "lead", "director", "head", "vp", "chief", "associate", "staff", "principal"
+  ];
+  for (const g of generic) {
+    dept = dept.replace(new RegExp(`\\b${g}\\b`, "gi"), "");
   }
-
-  return `site:linkedin.com "${company}" (${roleVariants.join(" OR ")})`;
+  return dept.replace(/[^a-z0-9 ]/gi, " ").trim().replace(/\s+/g, " ");
 }
 
-/** Heuristic score: how likely is this result a relevant hiring-manager profile? */
+/** Build specific LinkedIn search queries to avoid HR saturation */
+function buildQueries(company: string, jobTitle: string, excludeNames: string[] = []): { deptQuery: string; hrQuery: string } {
+  const deptKeywords = extractDepartmentKeywords(jobTitle);
+  const title = jobTitle.toLowerCase();
+  
+  const roleVariants: string[] = [];
+  if (title.includes("product") || title.includes("pm")) {
+    roleVariants.push("Product", "PM", "Founder");
+  } else if (title.includes("engineer") || title.includes("developer")) {
+    roleVariants.push("Engineering", "Software", "Tech Lead", "CTO", "Founder");
+  } else {
+    roleVariants.push(`"${jobTitle}"`, "Founder", "Manager", "Lead", "Director");
+  }
+
+  let deptQuery = `site:linkedin.com/in intitle:"${company}"`;
+  if (deptKeywords) {
+    deptQuery += ` "${deptKeywords}"`;
+  }
+  deptQuery += ` (${roleVariants.join(" OR ")})`;
+
+  let hrQuery = `site:linkedin.com/in intitle:"${company}" (HR OR Recruiter OR "Talent Acquisition" OR "Talent")`;
+
+  if (excludeNames && excludeNames.length > 0) {
+    const exclusions = excludeNames.map(n => `-"${n}"`).join(" ");
+    deptQuery += ` ${exclusions}`;
+    hrQuery += ` ${exclusions}`;
+  }
+
+  return { deptQuery, hrQuery };
+}
+
+/** Heuristic score */
 function scoreResult(title: string, snippet: string, url: string): number {
   let score = 0;
   const t = title.toLowerCase();
   const s = snippet.toLowerCase();
 
-  const keywords = [
-    "manager","lead","head","senior","principal","director","vp","chief",
-  ];
+  const keywords = ["manager","lead","head","senior","principal","director","vp","chief"];
   for (const k of keywords) {
     if (t.includes(k)) score += 2;
     if (s.includes(k)) score += 1;
   }
 
-  // LinkedIn profile pages are more valuable
   if (url.includes("linkedin.com/in/")) score += 3;
-  if (url.includes("linkedin.com/company/")) score += 1;
-
   if (title.length > 0) score += 0.5;
   return score;
 }
 
-/** Extract name from a LinkedIn /in/ URL */
-function nameFromUrl(url: string): string {
-  const m = url.match(/\/in\/([^/?#]+)/i);
-  if (!m?.[1]) return "";
-  return decodeURIComponent(m[1])
-    .replace(/[-_]/g, " ")
-    .split(/\s+/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ")
-    .trim();
-}
-
 export async function searchCandidates(
   company: string,
-  jobTitle: string
+  jobTitle: string,
+  excludeNames: string[] = []
 ): Promise<SearchResult[]> {
-  const q = buildQuery(company, jobTitle);
+  const { deptQuery, hrQuery } = buildQueries(company, jobTitle, excludeNames);
+  const serperKey = process.env.SERPER_API_KEY;
 
-  const params = new URLSearchParams({
-    key: CSE_KEY,
-    cx: CSE_CX,
-    q,
-  });
-
-  const res = await fetch(
-    `https://www.googleapis.com/customsearch/v1?${params}`
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Google CSE error ${res.status}: ${text}`);
+  if (!serperKey) {
+    throw new Error("SERPER_API_KEY is not configured.");
   }
 
-  const data = await res.json();
-  const items: Array<{ link?: string; title?: string; snippet?: string; displayLink?: string }> =
-    data.items ?? [];
+  async function runQuery(q: string) {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": serperKey!, "Content-Type": "application/json" },
+      body: JSON.stringify({ q, num: 10 })
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.organic || [];
+  }
 
-  // Filter to candidate-relevant domains
-  const candidateDomains = [
-    "linkedin.com","foundit.in","naukri.com","angel.co",
-    "glassdoor.com","indeed.com",
-  ];
-
-  const seen = new Set<string>();
+  const [deptItems, hrItems] = await Promise.all([runQuery(deptQuery), runQuery(hrQuery)]);
+  const items = [...deptItems, ...hrItems];
+  
   const results: SearchResult[] = [];
+  const seenUrls = new Set<string>();
 
   for (const item of items) {
-    const url = (item.link ?? "").replace(/\/$/, "");
-    if (!url) continue;
+    let link = item.link || "";
+    if (!link.includes("linkedin.com/in/")) continue;
+    link = link.split("?")[0].replace(/\/$/, "");
+    if (seenUrls.has(link)) continue;
+    seenUrls.add(link);
 
-    const lowerUrl = url.toLowerCase();
-    const isCandidate =
-      lowerUrl.includes("linkedin.com/in/") ||
-      lowerUrl.includes("linkedin.com/company/") ||
-      candidateDomains.some((d) => lowerUrl.includes(d));
-
-    if (!isCandidate) continue;
-    if (seen.has(url)) continue;
-    seen.add(url);
-
-    const title = (item.title ?? "").replace(/<[^>]*>/g, "").trim();
-    const snippet = (item.snippet ?? "").replace(/<[^>]*>/g, "").trim();
-
+    let cleanTitle = (item.title || "").split("-")[0].trim().split("|")[0].trim();
     results.push({
-      url,
-      title,
-      snippet,
-      domain: item.displayLink ?? new URL(url).hostname,
-      score: scoreResult(title, snippet, url),
+      url: link,
+      title: cleanTitle,
+      snippet: item.snippet || "",
+      domain: "linkedin.com",
+      score: scoreResult(cleanTitle, item.snippet || "", link)
     });
   }
 
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, 8);
+  return results.slice(0, 10);
 }
 
-/**
- * LLM-only fallback for contact discovery.
- * Used when Google CSE keys are not available.
- */
-export async function searchCandidatesLLM(
-  company: string,
-  jobTitle: string,
-  jd?: string
-): Promise<SearchResult[]> {
-  interface LLMContact {
-    name: string;
-    title: string;
-    role_type: string;
-    linkedin_url?: string;
-    confidence: number;
-    reason: string;
+export function extractContactsFromJD(jd: string): Array<{ name: string; context: string; email?: string }> {
+  if (!jd) return [];
+  const contacts: Array<{ name: string; email?: string; context: string }> = [];
+  const seen = new Set<string>();
+
+  const emailRegex = /([a-zA-Z][a-zA-Z0-9_.+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+  let emailMatch: RegExpExecArray | null;
+  while ((emailMatch = emailRegex.exec(jd)) !== null) {
+    const localPart = emailMatch[1];
+    const fullEmail = emailMatch[0];
+    const genericPrefixes = ["info", "hr", "hello", "contact", "support", "noreply", "admin", "careers", "jobs", "hiring", "team"];
+    if (genericPrefixes.some(g => localPart.toLowerCase().startsWith(g))) continue;
+
+    const parts = localPart.replace(/[._-]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").split(/\s+/).filter(p => p.length > 0).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase());
+    if (parts.length >= 2) {
+      const name = parts.join(" ");
+      if (!seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        contacts.push({ name, email: fullEmail, context: `Email mentioned in JD: ${fullEmail}` });
+      }
+    }
   }
 
+  const stopWords = new Set(["product", "manager", "happy", "work", "full", "early", "strong", "looking", "platform", "customer", "associate", "senior", "junior", "what", "where", "when", "this", "that", "will", "from", "have", "your", "with", "about", "more", "here", "good", "great"]);
+  function isValidName(name: string): boolean {
+    const words = name.split(/\s+/);
+    if (words.length < 2 || words.length > 4) return false;
+    for (const w of words) {
+      if (!/^[A-Z][a-z]+$/.test(w)) return false;
+      if (stopWords.has(w.toLowerCase())) return false;
+    }
+    return name.length >= 5;
+  }
+
+  const patterns = [/(?:drop\s+(?:me\s+or\s+)?|reach\s+out\s+to\s+|contact\s+|message\s+|ping\s+|connect\s+with\s+|email\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/g];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(jd)) !== null) {
+      const name = m[1].trim();
+      if (!isValidName(name)) continue;
+      if (!seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        contacts.push({ name, context: "Mentioned in JD as contact person" });
+      }
+    }
+  }
+  return contacts;
+}
+
+export async function findContactsLLMOnly(
+  company: string, jobTitle: string, jd?: string, excludeNames: string[] = [], apiKey?: string
+): Promise<SearchResult[]> {
+  interface LLMContact { name: string; title: string; role_type: string; confidence: number; reason: string; }
   const prompt = `You are a recruiter intelligence engine. I need to find the people most likely responsible for hiring a "${jobTitle}" at "${company}".
-
 ${jd ? `Job Description: ${jd.substring(0, 500)}` : ""}
-
-Return the top 5 most likely decision-makers (hiring managers, team leads, HR/recruiters) at this company for this role.
-
-For each person, provide:
-- name: Their full name (your best guess based on your training data)
-- title: Their current job title
-- role_type: One of "hiring_manager", "team_lead", "recruiter_hr"
-- linkedin_url: Their LinkedIn profile URL if you know it, otherwise null
-- confidence: 0.0-1.0 how confident you are
-- reason: Brief reason why they are relevant
-
-Return ONLY a JSON array. No explanation. Example:
-[{"name":"Jane Doe","title":"VP Product","role_type":"hiring_manager","linkedin_url":null,"confidence":0.7,"reason":"VP of product typically hires PMs"}]`;
+Return the top 5 most likely decision-makers (hiring managers, team leads, HR/recruiters).
+Return ONLY a JSON array with: name, title, role_type, confidence (0.0-1.0), reason.`;
 
   try {
     const contacts = await askJSON<LLMContact[]>(prompt);
-
+    const excludeSet = new Set((excludeNames || []).map(n => n.toLowerCase()));
     return contacts
-      .filter((c) => c.name && c.name.trim())
+      .filter(c => c.name && c.name.trim() && !excludeSet.has(c.name.toLowerCase()))
       .map((c, idx) => ({
-        url: c.linkedin_url || `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(c.name + " " + company)}`,
-        title: `${c.name} — ${c.title}`,
-        snippet: `${c.role_type}: ${c.reason} (Confidence: ${Math.round(c.confidence * 100)}%)`,
-        domain: "linkedin.com",
-        score: (contacts.length - idx) * 2 + (c.confidence * 5),
+        url: "", title: `${c.name} — ${c.title}`,
+        snippet: `⚠️ LLM-generated (unverified): ${c.role_type}: ${c.reason} (Confidence: ${Math.round(c.confidence * 100)}%)`,
+        domain: "linkedin.com", score: (contacts.length - idx) * 2 + (c.confidence * 5),
       }));
   } catch (err) {
-    console.error("LLM contact search failed:", err);
     return [];
   }
 }
 
-/**
- * Auto-select: uses Google CSE if keys are available, falls back to LLM.
- */
 export async function searchCandidatesAuto(
   company: string,
   jobTitle: string,
-  jd?: string
-): Promise<SearchResult[]> {
-  if (CSE_KEY && CSE_CX) {
+  jd?: string,
+  excludeNames: string[] = []
+): Promise<{ results: SearchResult[]; jdContacts: any[]; localApiUsage: { search: number } }> {
+  let jdContacts: any[] = [];
+  if (jd && jd.trim().length > 10) {
+    jdContacts = extractContactsFromJD(jd);
+  }
+
+  const knownNames = jdContacts.map((c) => c.name);
+  const combinedExcludes = [...excludeNames, ...knownNames];
+
+  let searchResults: SearchResult[] = [];
+  const serperKey = process.env.SERPER_API_KEY ?? "";
+  let searchCalls = 0;
+
+  if (serperKey) {
     try {
-      return await searchCandidates(company, jobTitle);
-    } catch (err) {
-      console.warn("Google CSE failed, falling back to LLM:", err);
-      return searchCandidatesLLM(company, jobTitle, jd);
+      searchCalls += 2; // deptQuery and hrQuery
+      searchResults = await searchCandidates(company, jobTitle, combinedExcludes);
+    } catch (err) {}
+  }
+
+  if (searchResults.length === 0) {
+    try {
+      const q = buildQueries(company, jobTitle, combinedExcludes).deptQuery;
+      const ddgResults = await ddgSearch(q);
+      const seenUrls = new Set<string>();
+      for (const res of ddgResults.results) {
+        if (!res.url.includes("linkedin.com/in/")) continue;
+        const link = res.url.split("?")[0].replace(/\/$/, "");
+        if (seenUrls.has(link)) continue;
+        seenUrls.add(link);
+        const cleanTitle = res.title.split("-")[0].split("|")[0].trim();
+        searchResults.push({ url: link, title: cleanTitle, snippet: res.description || "", domain: "linkedin.com", score: scoreResult(cleanTitle, res.description || "", link) });
+      }
+      searchResults.sort((a, b) => b.score - a.score);
+      searchResults = searchResults.slice(0, 10);
+    } catch (e) {}
+  }
+
+  if (searchResults.length === 0) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      searchResults = await findContactsLLMOnly(company, jobTitle, jd, combinedExcludes, apiKey);
     }
   }
-  return searchCandidatesLLM(company, jobTitle, jd);
+
+  const uniqueUrls = new Set<string>();
+  const finalResults: SearchResult[] = [];
+  for (const r of searchResults) {
+    if (!r.url || !uniqueUrls.has(r.url)) {
+      if (r.url) uniqueUrls.add(r.url);
+      finalResults.push(r);
+    }
+  }
+
+  return { results: finalResults, jdContacts, localApiUsage: { search: searchCalls } };
 }
