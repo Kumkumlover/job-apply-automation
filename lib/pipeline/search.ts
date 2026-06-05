@@ -18,9 +18,29 @@ function extractDepartmentKeywords(jobTitle: string): string {
   return dept.replace(/[^a-z0-9 ]/gi, " ").trim().replace(/\s+/g, " ");
 }
 
+function extractDepartmentFromJD(jd: string): string {
+  if (!jd) return "";
+  const specificDeptRegex = /(?:for|in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g;
+  let match;
+  while ((match = specificDeptRegex.exec(jd)) !== null) {
+    const word = match[1].toLowerCase();
+    if (!["a", "an", "the", "this", "that", "all", "any"].includes(word)) {
+      return match[1].trim();
+    }
+  }
+  const commonDepartments = ["Credit Cards", "Retail", "Wholesale", "SME", "Wealth Management", "Risk", "Compliance", "Marketing", "Sales", "Data Science", "Machine Learning", "Payments", "Loans", "Mortgage", "Cloud", "Security", "AI"];
+  for (const dept of commonDepartments) {
+    if (jd.toLowerCase().includes(dept.toLowerCase())) return dept;
+  }
+  return "";
+}
+
 /** Build specific LinkedIn search queries to avoid HR saturation */
-function buildQueries(company: string, jobTitle: string, excludeNames: string[] = []): { deptQuery: string; hrQuery: string } {
-  const deptKeywords = extractDepartmentKeywords(jobTitle);
+function buildQueries(company: string, jobTitle: string, excludeNames: string[] = [], jd: string = ""): { deptQuery: string; hrQuery: string } {
+  let deptKeywords = extractDepartmentKeywords(jobTitle);
+  if (!deptKeywords && jd) {
+    deptKeywords = extractDepartmentFromJD(jd);
+  }
   const title = jobTitle.toLowerCase();
   
   const roleVariants: string[] = [];
@@ -69,9 +89,10 @@ function scoreResult(title: string, snippet: string, url: string): number {
 export async function searchCandidates(
   company: string,
   jobTitle: string,
-  excludeNames: string[] = []
+  excludeNames: string[] = [],
+  jd: string = ""
 ): Promise<SearchResult[]> {
-  const { deptQuery, hrQuery } = buildQueries(company, jobTitle, excludeNames);
+  const { deptQuery, hrQuery } = buildQueries(company, jobTitle, excludeNames, jd);
   const serperKey = process.env.SERPER_API_KEY;
 
   if (!serperKey) {
@@ -210,13 +231,13 @@ export async function searchCandidatesAuto(
   if (serperKey) {
     try {
       searchCalls += 2; // deptQuery and hrQuery
-      searchResults = await searchCandidates(company, jobTitle, combinedExcludes);
+      searchResults = await searchCandidates(company, jobTitle, combinedExcludes, jd);
     } catch (err) {}
   }
 
   if (searchResults.length === 0) {
     try {
-      const q = buildQueries(company, jobTitle, combinedExcludes).deptQuery;
+      const q = buildQueries(company, jobTitle, combinedExcludes, jd).deptQuery;
       const ddgResults = await ddgSearch(q);
       const seenUrls = new Set<string>();
       for (const res of ddgResults.results) {
@@ -230,6 +251,15 @@ export async function searchCandidatesAuto(
       searchResults.sort((a, b) => b.score - a.score);
       searchResults = searchResults.slice(0, 10);
     } catch (e) {}
+  }
+
+  // Strictly filter out excludeNames locally to fix the cycling bug
+  if (combinedExcludes.length > 0) {
+    const excludeSet = new Set(combinedExcludes.map(n => n.toLowerCase()));
+    searchResults = searchResults.filter(r => {
+      const name = (r.title || "").split("—")[0].split("-")[0].trim().toLowerCase();
+      return !excludeSet.has(name);
+    });
   }
 
   // Removed findContactsLLMOnly fallback. If search yields nothing, we return empty so the user knows no real profiles were found.
