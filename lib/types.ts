@@ -28,6 +28,7 @@ export interface RankedCandidate {
   role_type: "hiring_manager" | "team_lead" | "recruiter_hr" | "other";
   confidence: number;
   reason: string;
+  email?: string;
 }
 
 /** Output of the email discovery step */

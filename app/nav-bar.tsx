@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap, Search, Sparkles, Send, Bug } from "lucide-react";
+import { Zap, Search, Sparkles, Send, Bug, Settings } from "lucide-react";
 
 const links = [
   { href: "/outreach", label: "Outreach", icon: Zap },
@@ -10,6 +10,7 @@ const links = [
   { href: "/email-generator", label: "Email Generator", icon: Sparkles },
   { href: "/", label: "Quick Apply", icon: Send },
   { href: "/debug", label: "Debug", icon: Bug },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function NavBar() {

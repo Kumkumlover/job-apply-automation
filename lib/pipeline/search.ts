@@ -255,10 +255,17 @@ export async function searchCandidatesAuto(
 
   // Strictly filter out excludeNames locally to fix the cycling bug
   if (combinedExcludes.length > 0) {
-    const excludeSet = new Set(combinedExcludes.map(n => n.toLowerCase()));
+    const excludeSet = new Set(combinedExcludes.map(n => n.trim().toLowerCase()));
     searchResults = searchResults.filter(r => {
-      const name = (r.title || "").split("—")[0].split("-")[0].trim().toLowerCase();
-      return !excludeSet.has(name);
+      let name = (r.title || "").split("—")[0].split("-")[0].split("|")[0].trim().toLowerCase();
+      
+      // Also do a substring check just in case the title format is weird
+      for (const excluded of excludeSet) {
+        if (name === excluded || name.includes(excluded)) {
+          return false; // Filter out
+        }
+      }
+      return true; // Keep
     });
   }
 

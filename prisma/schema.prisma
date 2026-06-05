@@ -191,6 +191,13 @@ model LinkedGmailAccount {
 model ProfileContext {
   id         String   @id @default(cuid())
   userId     String   @unique
+  senderName   String?  @default("Shikhar Gupta")
+  portfolioUrl String?
+  linkedinUrl  String?
+  phone        String?
+  aboutMeBullets String? @db.Text
+  emailTemplateStructure String? @db.Text
+  systemPrompt String?   @db.Text
   resume     String?  @db.Text
   skills     String?  @db.Text
   background String?  @db.Text

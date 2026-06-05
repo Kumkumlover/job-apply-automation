@@ -24,7 +24,8 @@ import { ask, askJSON } from "./llm";
 export interface PersonInput {
   name: string;
   company: string;
-  domain: string;
+  domain?: string;
+  email?: string;
 }
 
 export interface EmailResult {
@@ -402,7 +403,8 @@ async function processPerson(
   person: PersonInput,
   hunterKey: string,
   apolloKey: string,
-  preFetchedResults?: Map<string, any>
+  preFetchedResults?: Map<string, any>,
+  localApiUsage: { hunter: number; apollo: number } = { hunter: 0, apollo: 0 }
 ): Promise<PersonResult> {
   const { first, last } = parseName(person.name);
   let domain = extractDomain(person.domain ?? "");
@@ -447,40 +449,50 @@ async function processPerson(
 
   const results: EmailResult[] = [];
 
-  // 1.5 Public Web Search (Free)
-  // If email is publicly available (e.g., LinkedIn bio, press release), skip Hunter.
-  const publicEmail = await searchPublicEmail(resolvedPerson.name, resolvedPerson.company, domain);
-  if (publicEmail) {
-    const pattern = extractPattern(first, last, publicEmail.split("@")[0]);
-    await store.saveEmail(publicEmail, resolvedPerson.name, domain, pattern, 0.90, "Public Web Search", true);
-    await store.recordPatternSuccess(pattern, domain);
+  // Find how many distinct people have verified emails for this domain
+  const verifiedCount = new Set(allDomainEmails.filter(c => c.verified).map(c => c.name)).size;
 
-    return formatOutput(resolvedPerson, [
-      { email: publicEmail, type: "verified", confidence: 0.90, source: "Public Web Search" },
-    ]);
-  }
-
-  // 1.7 Deep LLM Knowledge Search (Free)
-  // Ask the LLM if it inherently knows this person's email before burning API credits.
-  const llmEmail = await llmDeepEmailSearch(resolvedPerson.name, resolvedPerson.company, domain);
-  if (llmEmail) {
-    const pattern = extractPattern(first, last, llmEmail.split("@")[0]);
-    await store.saveEmail(llmEmail, resolvedPerson.name, domain, pattern, 0.88, "Deep LLM Search", true);
-    await store.recordPatternSuccess(pattern, domain);
-
-    return formatOutput(resolvedPerson, [
-      { email: llmEmail, type: "verified", confidence: 0.88, source: "Deep LLM Search" },
-    ]);
+  // 1.5 Pattern Engine Fast-Path (0 Credits)
+  // If we already know the exact pattern for this domain (e.g. from JD contacts), use it instantly!
+  const topPatterns = await getTopPatterns(domain, 5);
+  let fastPathFound = false;
+  
+  if (topPatterns.length > 0) {
+    const bestPattern = topPatterns[0];
+    // If the pattern has a high success rate and we have at least 2 verified emails (locked domain), trust it
+    if (verifiedCount >= 2 && bestPattern.usageCount > 0 && (bestPattern.successCount / bestPattern.usageCount) >= 0.90) {
+      const allPerms = generatePermutations(first, last, domain);
+      const matchedPerm = allPerms.find(p => p.pattern === bestPattern.pattern);
+      
+      if (matchedPerm) {
+        // Skip validation entirely for 90%+ confidence patterns (e.g. from JD) to prevent Vercel 504 timeouts!
+        // We know the domain exists because the pattern was already seeded and verified.
+        await store.saveEmail(matchedPerm.email, resolvedPerson.name, domain, matchedPerm.pattern, 0.99, "Pattern Engine", false);
+        await store.recordPatternSuccess(matchedPerm.pattern, domain);
+        
+        return formatOutput(resolvedPerson, [
+          { email: matchedPerm.email, type: "predicted", confidence: 0.99, source: "Pattern Engine" }
+        ]);
+      }
+    }
   }
 
   // 2. API Lookups (max 2 per domain)
-  if (domain && hunterKey) {
-    const cacheKey = `${resolvedPerson.name}-${domain}`;
-    let hunterData = preFetchedResults?.get(cacheKey);
-    
-    if (!hunterData) {
-      hunterData = await hunterLookup(domain, first, last, hunterKey);
+  if (domain && hunterKey && apiCalls < 2) {
+    // Check prefetched
+    const prefetched = preFetchedResults?.get(`${resolvedPerson.name}-${domain}`);
+    if (prefetched) {
+      const pattern = extractPattern(first, last, prefetched.email.split("@")[0]);
+      await store.saveEmail(prefetched.email, resolvedPerson.name, domain, pattern, 0.95, prefetched.source, true);
+      await store.recordPatternSuccess(pattern, domain);
+      
+      return formatOutput(resolvedPerson, [
+        { email: prefetched.email, type: "verified", confidence: 0.95, source: prefetched.source },
+      ]);
     }
+
+    localApiUsage.hunter++;
+    const hunterData = await hunterLookup(domain, first, last, hunterKey);
 
     if (hunterData) {
       const pattern = extractPattern(first, last, hunterData.email.split("@")[0]);
@@ -495,6 +507,7 @@ async function processPerson(
 
   if (apiCalls < 2) {
     // Try Apollo
+    localApiUsage.apollo++;
     const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
     if (apolloResult) {
       const pattern = extractPattern(first, last, apolloResult.email.split("@")[0]);
@@ -506,6 +519,32 @@ async function processPerson(
       ]);
     }
   }
+
+  // 3. Public Web Search (Free, Slow fallback)
+  const publicEmail = await searchPublicEmail(resolvedPerson.name, resolvedPerson.company, domain);
+  if (publicEmail) {
+    const pattern = extractPattern(first, last, publicEmail.split("@")[0]);
+    await store.saveEmail(publicEmail, resolvedPerson.name, domain, pattern, 0.90, "Public Web Search", true);
+    await store.recordPatternSuccess(pattern, domain);
+
+    return formatOutput(resolvedPerson, [
+      { email: publicEmail, type: "verified", confidence: 0.90, source: "Public Web Search" },
+    ]);
+  }
+
+  // 4. Deep LLM Knowledge Search (Free, Slow fallback)
+  const llmEmail = await llmDeepEmailSearch(resolvedPerson.name, resolvedPerson.company, domain);
+  if (llmEmail) {
+    const pattern = extractPattern(first, last, llmEmail.split("@")[0]);
+    await store.saveEmail(llmEmail, resolvedPerson.name, domain, pattern, 0.88, "Deep LLM Search", true);
+    await store.recordPatternSuccess(pattern, domain);
+
+    return formatOutput(resolvedPerson, [
+      { email: llmEmail, type: "verified", confidence: 0.88, source: "Deep LLM Search" },
+    ]);
+  }
+
+
 
   // If API lookups failed but we had cached predictions, return them now to avoid regenerating
   if (cached.length > 0) {
@@ -547,24 +586,22 @@ async function processPerson(
     // Sort by historical score descending
     scoredPerms.sort((a, b) => b.score - a.score);
 
-    // Test the top 15 most likely permutations, but only keep the top 5 valid ones
-    let validCount = 0;
-    for (const guess of scoredPerms.slice(0, 15)) {
-      if (validCount >= 5) break;
+    // Skip strict DNS validation to prevent 504 timeouts!
+    // Just return the top 4 most likely permutations based on historical/global patterns.
+    const topGuesses = scoredPerms.slice(0, 4);
+    
+    for (const guess of topGuesses) {
       if (results.some((r) => r.email === guess.email)) continue;
-
-      const validation = await validateEmail(guess.email);
-      if (validation.mx_ok && validation.domain_ok) {
-        results.push({ 
-          email: guess.email, 
-          type: "predicted", 
-          confidence: guess.score, 
-          source: "Pattern Engine" 
-        });
-        validCount++;
-        
-        await store.saveEmail(guess.email, resolvedPerson.name, domain, guess.pattern, guess.score, "Pattern Engine", false);
-      }
+      
+      results.push({ 
+        email: guess.email, 
+        type: "predicted", 
+        confidence: guess.score, 
+        source: "Pattern Engine" 
+      });
+      
+      // Save them as predicted, not verified
+      await store.saveEmail(guess.email, resolvedPerson.name, domain, guess.pattern, guess.score, "Pattern Engine", false);
     }
   }
 
@@ -591,7 +628,7 @@ function formatOutput(person: PersonInput, emails: EmailResult[]): PersonResult 
   return {
     name: person.name,
     company: person.company,
-    domain: person.domain,
+    domain: person.domain || "",
     emails,
     recommended,
   };
@@ -604,9 +641,10 @@ export async function enrichAll(
   people: PersonInput[],
   hunterKey: string,
   apolloKey: string
-): Promise<PersonResult[]> {
+): Promise<{ results: PersonResult[]; localApiUsage: { hunter: number; apollo: number } }> {
   const results: PersonResult[] = [];
   const preFetchedResults = new Map<string, any>();
+  const localApiUsage = { hunter: 0, apollo: 0 };
 
   // 1. Group people by company
   const companyGroups = new Map<string, PersonInput[]>();
@@ -619,10 +657,13 @@ export async function enrichAll(
 
   // 2. Resolve domain for each company ONCE
   for (const [comp, group] of companyGroups.entries()) {
-    // Check if any person in this group already has a domain provided
+    // Check if any person in this group already has a domain provided or an email
     let sharedDomain = "";
     for (const p of group) {
-      const extracted = extractDomain(p.domain ?? "");
+      let extracted = extractDomain(p.domain ?? "");
+      if (!extracted && p.email) {
+        extracted = extractDomain(p.email.split("@")[1] || "");
+      }
       if (extracted) {
         sharedDomain = extracted;
         break;
@@ -635,23 +676,27 @@ export async function enrichAll(
       
       let verifiedDomain = "";
       
-      // Try each guessed domain against each person in the group until we find a match
-      for (const guess of guesses) {
-        for (const person of group) {
-          const fName = person.name.split(" ")[0] || "";
-          const lName = person.name.split(" ").slice(1).join(" ") || "";
+      // To avoid Vercel's 10s timeout, test all guesses concurrently on just ONE candidate
+      const testCandidate = group.find(p => !p.email);
+      
+      if (testCandidate && guesses.length > 0) {
+        const fName = testCandidate.name.split(" ")[0] || "";
+        const lName = testCandidate.name.split(" ").slice(1).join(" ") || "";
+        
+        if (fName && lName) {
+          // Limit to max 3 guesses to avoid Hunter rate limits
+          const topGuesses = guesses.slice(0, 3);
           
-          if (fName && lName) {
-            const hunterResult = await hunterLookup(guess, fName, lName, hunterKey);
-            if (hunterResult) {
+          for (const guess of topGuesses) {
+            localApiUsage.hunter++;
+            const result = await hunterLookup(guess, fName, lName, hunterKey);
+            if (result) {
               verifiedDomain = guess;
-              // Cache this specific person's result so processPerson can use it instantly later
-              preFetchedResults.set(`${person.name}-${guess}`, hunterResult);
+              preFetchedResults.set(`${testCandidate.name}-${verifiedDomain}`, result);
               break;
             }
           }
         }
-        if (verifiedDomain) break;
       }
 
       if (verifiedDomain) {
@@ -676,16 +721,51 @@ export async function enrichAll(
         if (!extractDomain(p.domain ?? "")) {
           p.domain = sharedDomain;
         }
+        
+        // --- JD Extraction Pattern Feedback Loop ---
+        // If they already have an email (from JD), feed it into the Pattern Engine!
+        if (p.email) {
+          const { first, last } = parseName(p.name);
+          const localPart = p.email.split("@")[0].toLowerCase();
+          const pattern = extractPattern(first, last, localPart);
+          
+          // Save it to the database so the Pattern Engine can use it for others
+          await store.saveEmail(
+            p.email,
+            p.name,
+            sharedDomain,
+            pattern,
+            100, // max confidence
+            "JD Extraction",
+            true // verified
+          );
+          if (pattern !== "unknown") {
+            await store.recordPatternSuccess(pattern, sharedDomain);
+          }
+        }
       }
     }
   }
 
-  // 3. Process each person individually now that domains are resolved
+  // 3. Process each person
+  // We process SEQUENTIALLY on purpose. The database cache enforces a max limit 
+  // of 2 API calls per domain. If we process in parallel, they all query the DB
+  // simultaneously, read '0 API calls', and all hit Hunter at the same time.
   for (const person of people) {
-    const p = await processPerson(person, hunterKey, apolloKey, preFetchedResults);
+    if (person.email) {
+      results.push({
+        name: person.name,
+        company: person.company,
+        domain: person.domain || "",
+        emails: [{ email: person.email, source: "JD Extraction", confidence: 100, type: "verified" } as EmailResult],
+        recommended: person.email,
+      });
+      continue;
+    }
+    const p = await processPerson(person, hunterKey, apolloKey, preFetchedResults, localApiUsage);
     results.push(p);
   }
-  return results;
+  return { results, localApiUsage };
 }
 
 export { type PersonInput as PersonInputType };

@@ -1,8 +1,5 @@
 import dns from "dns/promises";
 
-// Configure DNS to use public Google DNS to prevent local network ECONNREFUSED errors
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
-
 /* ── Disposable domain detection ── */
 
 const DISPOSABLE_DOMAINS = new Set([

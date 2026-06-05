@@ -108,6 +108,23 @@ export default function EmailFinderPage() {
   const [results, setResults] = useState<PersonResult[] | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const savedPeople = localStorage.getItem("finder_people");
+    if (savedPeople) setPeople(JSON.parse(savedPeople));
+
+    const savedResults = localStorage.getItem("finder_results");
+    if (savedResults) setResults(JSON.parse(savedResults));
+
+    const savedStatus = localStorage.getItem("finder_status");
+    if (savedStatus) setStatus(savedStatus as Status);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("finder_people", JSON.stringify(people));
+    localStorage.setItem("finder_results", JSON.stringify(results));
+    localStorage.setItem("finder_status", status);
+  }, [people, results, status]);
   const [feedbackGiven, setFeedbackGiven] = useState<
     Record<string, "correct" | "incorrect">
   >({});
