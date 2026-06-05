@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 60;
 import { searchCandidatesAuto } from "@/lib/pipeline/search";
 import { rankCandidates } from "@/lib/pipeline/rank";
 import { enrichAll, type PersonInput } from "@/lib/email-finder";

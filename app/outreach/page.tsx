@@ -770,7 +770,7 @@ export default function OutreachPage() {
                       <p className="text-xs text-slate-500 mt-1">{c.reason}</p>
                       {c.profile_url && (
                         <a
-                          href={c.profile_url}
+                          href={c.profile_url.startsWith("http") ? c.profile_url : `https://${c.profile_url}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-xs text-blue-400 mt-1.5 hover:text-blue-300"
