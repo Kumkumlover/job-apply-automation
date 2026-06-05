@@ -231,13 +231,8 @@ export async function searchCandidatesAuto(
     } catch (e) {}
   }
 
-  if (searchResults.length === 0) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      searchResults = await findContactsLLMOnly(company, jobTitle, jd, combinedExcludes, apiKey);
-    }
-  }
-
+  // Removed findContactsLLMOnly fallback. If search yields nothing, we return empty so the user knows no real profiles were found.
+  
   const uniqueUrls = new Set<string>();
   const finalResults: SearchResult[] = [];
   for (const r of searchResults) {
