@@ -425,22 +425,38 @@ export async function searchCandidatesAuto(
     osintKeyword = deptKeywords.split(" ")[0] || "";
   }
 
+  const serperKey = process.env.SERPER_API_KEY ?? "";
+
   try {
-    const [yahooResults, githubResults] = await Promise.all([
+    const searchPromises: Promise<SearchResult[]>[] = [
       searchYahooXRay(company, osintKeyword),
       searchGitHubOSINT(company, osintKeyword)
-    ]);
+    ];
+
+    if (serperKey) {
+      searchCalls += 2;
+      searchPromises.push(
+        searchCandidates(company, jobTitle, combinedExcludes, jd).catch(err => {
+          console.error("[search] Serper engine failed:", err);
+          return [] as SearchResult[];
+        })
+      );
+    }
+
+    const resultsArray = await Promise.all(searchPromises);
+    const yahooResults = resultsArray[0] || [];
+    const githubResults = resultsArray[1] || [];
+    const serperResults = resultsArray[2] || [];
     
-    searchResults = [...yahooResults, ...githubResults];
-    
-    // Rescore all OSINT results using our standard rubric to rank them properly
-    for (const res of searchResults) {
+    // Rescore all OSINT results using our standard rubric
+    for (const res of [...yahooResults, ...githubResults]) {
       res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords);
     }
     
+    searchResults = [...yahooResults, ...githubResults, ...serperResults];
     searchResults.sort((a, b) => b.score - a.score);
   } catch (err) {
-    console.error("[search] OSINT engine failed:", err);
+    console.error("[search] Omni-Search engine failed:", err);
   }
 
   // Fallback to generic emails if STILL 0
@@ -480,8 +496,22 @@ export async function searchCandidatesAuto(
   const uniqueUrls = new Set<string>();
   const finalResults: SearchResult[] = [];
   for (const r of searchResults) {
-    if (!r.url || !uniqueUrls.has(r.url)) {
-      if (r.url) uniqueUrls.add(r.url);
+    if (!r.url) {
+      finalResults.push(r);
+      continue;
+    }
+    
+    // Normalize URL for deduplication across different search engines
+    // e.g. "https://in.linkedin.com/in/john-doe" -> "linkedin.com/in/john-doe"
+    const normalizedUrl = r.url
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^(www\.|[a-z]{2}\.)/, '') // strips www. or in. or uk.
+      .split('?')[0]
+      .replace(/\/$/, "");
+
+    if (!uniqueUrls.has(normalizedUrl)) {
+      uniqueUrls.add(normalizedUrl);
       finalResults.push(r);
     }
   }
