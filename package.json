@@ -13,6 +13,8 @@
     "test:e2e:prod": "cross-env BASE_URL=https://job-apply-automation.vercel.app playwright test"
   },
   "dependencies": {
+    "@google/genai": "^2.8.0",
+    "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.21.1",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",

@@ -85,14 +85,35 @@ async function handleFindContacts(body: {
     : [];
 
   // Step 3: Prepend JD-extracted contacts at top (they're confirmed)
-  const jdRanked = jdContacts.map((c) => ({
-    name: c.name,
-    profile_url: "",
-    current_title: c.context,
-    role_type: "recruiter_hr" as const,
-    confidence: 1.0,
-    reason: "Explicitly mentioned in the job description as a contact person",
-    email: c.email || undefined,
+  const jdRanked = await Promise.all(jdContacts.map(async (c) => {
+    let profile_url = "";
+    try {
+      const q = `site:linkedin.com/in intitle:"${company}" "${c.name}"`;
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "X-API-KEY": process.env.SERPER_API_KEY || "", "Content-Type": "application/json" },
+        body: JSON.stringify({ q, num: 3 })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        for (const item of (data.organic || [])) {
+          if (item.link && item.link.includes("linkedin.com/in/")) {
+            profile_url = item.link.split("?")[0].replace(/\/$/, "");
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+    
+    return {
+      name: c.name,
+      profile_url,
+      current_title: c.context,
+      role_type: "recruiter_hr" as const,
+      confidence: 1.0,
+      reason: "Explicitly mentioned in the job description as a contact person",
+      email: c.email || undefined,
+    };
   }));
 
   const allCandidates = [...jdRanked, ...ranked];
@@ -129,10 +150,26 @@ async function handleFindEmails(
     );
   }
 
-  const hunterKey =
-    (req.headers.get("x-hunter-key") ?? body.hunterKey ?? "").trim();
-  const apolloKey =
-    (req.headers.get("x-apollo-key") ?? body.apolloKey ?? "").trim();
+  // Fallback chain: request header → body field → server-side env vars
+  // This ensures automated tests (Playwright) work without localStorage being populated.
+  const hunterKey = (
+    req.headers.get("x-hunter-key") ||
+    body.hunterKey ||
+    process.env.HUNTER_API_KEY ||
+    process.env.NEXT_PUBLIC_HUNTER_API_KEY ||
+    ""
+  ).trim();
+  const apolloKey = (
+    req.headers.get("x-apollo-key") ||
+    body.apolloKey ||
+    process.env.APOLLO_API_KEY ||
+    process.env.NEXT_PUBLIC_APOLLO_API_KEY ||
+    ""
+  ).trim();
+
+  console.log(`[find-emails] hunterKey present: ${!!hunterKey}, apolloKey present: ${!!apolloKey}`);
+  if (!hunterKey) console.warn("[find-emails] WARNING: Hunter API key missing — Hunter.io will be skipped!");
+  if (!apolloKey) console.warn("[find-emails] WARNING: Apollo API key missing — Apollo.io will be skipped!");
 
   const people: PersonInput[] = contacts.map((c) => ({
     name: c.name,
@@ -153,8 +190,9 @@ async function handleGenerateEmail(body: {
   company: string;
   jobTitle: string;
   jd?: string;
+  profileUrl?: string;
 }) {
-  const { recipientName, company, jobTitle, jd } = body;
+  const { recipientName, company, jobTitle, jd, profileUrl } = body;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
@@ -182,7 +220,7 @@ async function handleGenerateEmail(body: {
   }
 
   // Step 2: Use the exact templates the user built
-  const rawText = generateCopy(
+  const rawText = await generateCopy(
     problem,
     "Cold Email", // default format
     recipientName,
@@ -214,7 +252,11 @@ async function handleGenerateEmail(body: {
   }
 
   // Inject the clean inline reference links
-  htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n</body>`;
+  htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+  if (profileUrl) {
+    htmlBody += `  <div data-linkedin-url="${profileUrl}" style="display:none;">${profileUrl}</div>\n`;
+  }
+  htmlBody += `</body>`;
 
   // Generate subject
   const subject = `Application: ${jobTitle} — ${company}`;
@@ -240,7 +282,10 @@ async function handleSendEmail(body: {
 }) {
   const { toEmail, toName, subject, htmlBody, company, jobTitle } = body;
 
+  console.log(`[API] Received send-email request for ${toEmail}`);
+
   if (!toEmail?.trim()) {
+    console.error(`[API] Missing toEmail!`);
     return NextResponse.json(
       { error: "Recipient email is required." },
       { status: 400 }
@@ -248,39 +293,43 @@ async function handleSendEmail(body: {
   }
 
   // Send the email
-  const result = await sendOutboundEmail({
-    to_email: toEmail,
-    to_name: toName || "",
-    subject,
-    html_body: htmlBody,
-    company,
-    job_title: jobTitle,
-  });
-
-  // Save to OutreachCampaign
   try {
-    const userId = await getDefaultUserId();
-    await prisma.outreachCampaign.create({
-      data: {
-        userId,
-        company,
-        role: jobTitle,
-        hiringManager: toName || null,
-        emails: [toEmail],
-        subject,
-        body: htmlBody,
-        status: "sent",
-        sentAt: new Date(),
-      },
+    const result = await sendOutboundEmail({
+      to_email: toEmail,
+      to_name: toName || "",
+      subject,
+      html_body: htmlBody,
+      company,
+      job_title: jobTitle,
     });
-  } catch (dbErr) {
-    console.warn("Failed to save outreach campaign to DB:", dbErr);
-    // Don't fail the send if DB save fails
-  }
+    console.log(`[API] sendOutboundEmail successful! MessageId: ${result.messageId}`);
 
-  return NextResponse.json({
-    status: "sent",
-    messageId: result.messageId,
-    email: toEmail,
-  });
+
+    // Save to OutreachCampaign
+    try {
+      const userId = await getDefaultUserId();
+      await prisma.outreachCampaign.create({
+        data: {
+          userId,
+          company,
+          role: jobTitle,
+          hiringManager: toName || null,
+          emails: [toEmail],
+          subject,
+          body: htmlBody,
+          status: "sent",
+          sentAt: new Date(),
+        },
+      });
+    } catch (dbErr) {
+      console.error("[API] Failed to save outreach campaign to DB:", dbErr);
+      // don't throw, we still sent the email (or created the draft)
+    }
+
+    console.log(`[API] Finished processing send-email for ${toEmail}`);
+    return NextResponse.json({ success: true, messageId: result.messageId });
+  } catch (sendErr) {
+    console.error(`[API] Failed to send email via IMAP:`, sendErr);
+    return NextResponse.json({ error: "Failed to send email" }, { status: 500 });
+  }
 }

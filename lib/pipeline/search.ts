@@ -1,25 +1,40 @@
 import type { SearchResult } from "../types";
 import { askJSON } from "../llm";
 import { search as ddgSearch } from "duck-duck-scrape";
+import * as cheerio from "cheerio";
 
 /** 
- * Extract core department/domain keywords from a job title 
+ * Extract department/domain keywords from a job title.
+ * KEEPS specific domain words, only strips pure seniority/level words.
  */
 function extractDepartmentKeywords(jobTitle: string): string {
-  let dept = jobTitle.toLowerCase();
-  const generic = [
-    "product", "manager", "intern", "engineer", "developer", "software",
-    "senior", "junior", "lead", "director", "head", "vp", "chief", "associate", "staff", "principal",
-    "assistant", "executive", "specialist", "coordinator", "officer", "analyst", "consultant", "vice", "president"
+  const seniority = [
+    "senior", "junior", "lead", "staff", "principal", "associate",
+    "assistant", "executive", "vice", "president", "chief"
   ];
-  for (const g of generic) {
+  let dept = jobTitle.toLowerCase();
+  for (const g of seniority) {
     dept = dept.replace(new RegExp(`\\b${g}\\b`, "gi"), "");
   }
   return dept.replace(/[^a-z0-9 ]/gi, " ").trim().replace(/\s+/g, " ");
 }
 
+/**
+ * Extract department hint from job description text.
+ * Looks for explicit department mentions.
+ */
 function extractDepartmentFromJD(jd: string): string {
   if (!jd) return "";
+  const commonDepartments = [
+    "Credit Cards", "Cards", "Retail Banking", "Retail", "Wholesale", "SME",
+    "Wealth Management", "Risk", "Compliance", "Marketing", "Sales",
+    "Data Science", "Machine Learning", "Payments", "Loans", "Mortgage",
+    "Cloud", "Security", "AI", "Platform", "Growth", "Analytics"
+  ];
+  for (const dept of commonDepartments) {
+    if (jd.toLowerCase().includes(dept.toLowerCase())) return dept;
+  }
+  // Regex: look for "for <Dept>" or "in <Dept>" patterns
   const specificDeptRegex = /(?:for|in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g;
   let match;
   while ((match = specificDeptRegex.exec(jd)) !== null) {
@@ -28,62 +43,188 @@ function extractDepartmentFromJD(jd: string): string {
       return match[1].trim();
     }
   }
-  const commonDepartments = ["Credit Cards", "Retail", "Wholesale", "SME", "Wealth Management", "Risk", "Compliance", "Marketing", "Sales", "Data Science", "Machine Learning", "Payments", "Loans", "Mortgage", "Cloud", "Security", "AI"];
-  for (const dept of commonDepartments) {
-    if (jd.toLowerCase().includes(dept.toLowerCase())) return dept;
-  }
   return "";
 }
 
-/** Build specific LinkedIn search queries to avoid HR saturation */
-function buildQueries(company: string, jobTitle: string, excludeNames: string[] = [], jd: string = ""): { deptQuery: string; hrQuery: string } {
-  let deptKeywords = extractDepartmentKeywords(jobTitle);
-  if (!deptKeywords && jd) {
-    deptKeywords = extractDepartmentFromJD(jd);
-  }
-  const title = jobTitle.toLowerCase();
-  
+/** Build specific LinkedIn search queries to find dept-specific people AND HR separately */
+function buildQueries(
+  company: string,
+  jobTitle: string,
+  excludeNames: string[] = [],
+  jd: string = ""
+): { deptQuery: string; hrQuery: string; deptKeywords: string } {
+  // Use the full job title as primary signal, plus extracted dept from JD
+  const titleKeywords = extractDepartmentKeywords(jobTitle);
+  const jdDept = jd ? extractDepartmentFromJD(jd) : "";
+
+  // Build role variants from the job title itself
+  const titleLower = jobTitle.toLowerCase();
   const roleVariants: string[] = [];
-  if (title.includes("product") || title.includes("pm")) {
-    roleVariants.push("Product", "PM", "Founder");
-  } else if (title.includes("engineer") || title.includes("developer")) {
-    roleVariants.push("Engineering", "Software", "Tech Lead", "CTO", "Founder");
+
+  if (titleLower.includes("product") || titleLower.includes(" pm") || titleLower.includes("apm")) {
+    roleVariants.push("Product Manager", "Product Lead", "Head of Product", "VP Product", "Group Product Manager", "Director of Product", "Founder");
+  } else if (titleLower.includes("engineer") || titleLower.includes("developer")) {
+    roleVariants.push("Engineer", "Tech Lead", "Engineering Manager", "CTO", "Founder");
+  } else if (titleLower.includes("data") || titleLower.includes("analyst")) {
+    roleVariants.push("Data Analyst", "Data Scientist", "Analytics Lead", "Head of Data");
+  } else if (titleLower.includes("design")) {
+    roleVariants.push("Designer", "Design Lead", "UX Lead", "Head of Design");
   } else {
-    roleVariants.push(`"${jobTitle}"`, "Founder", "Manager", "Lead", "Director");
+    roleVariants.push(`"${jobTitle}"`, "Manager", "Lead", "Director", "Head", "Founder");
   }
 
-  let deptQuery = `site:linkedin.com/in intitle:"${company}"`;
-  if (deptKeywords) {
-    deptQuery += ` "${deptKeywords}"`;
+  // Dept query: search directly for role variants at the company.
+  // DO NOT also require titleKeywords in the query — for small companies that
+  // would double-restrict and return 0 results. Role variants alone are enough.
+  let deptQuery = `site:linkedin.com/in intitle:"${company}" (${roleVariants.map(r => `"${r}"`).join(" OR ")})`;
+
+  // Only add JD dept hint if it adds real signal beyond the role variants
+  if (jdDept && !titleKeywords.toLowerCase().includes(jdDept.toLowerCase())) {
+    deptQuery += ` "${jdDept}"`;
   }
-  deptQuery += ` (${roleVariants.join(" OR ")})`;
 
-  let hrQuery = `site:linkedin.com/in intitle:"${company}" (HR OR Recruiter OR "Talent Acquisition" OR "Talent")`;
+  // HR query: look for recruiters/HR at the company
+  const hrDeptHint = jdDept || titleKeywords || jobTitle;
+  let hrQuery = `site:linkedin.com/in intitle:"${company}" (Recruiter OR "Talent Acquisition" OR "HR Business Partner" OR "People Partner") "${hrDeptHint}"`;
 
-  if (excludeNames && excludeNames.length > 0) {
-    const exclusions = excludeNames.map(n => `-"${n}"`).join(" ");
+  const exclusions = excludeNames.length > 0
+    ? excludeNames.map(n => `-"${n}"`).join(" ")
+    : "";
+
+  if (exclusions) {
     deptQuery += ` ${exclusions}`;
     hrQuery += ` ${exclusions}`;
   }
 
-  return { deptQuery, hrQuery };
+  return { deptQuery, hrQuery, deptKeywords: titleKeywords || jdDept };
 }
 
-/** Heuristic score */
-function scoreResult(title: string, snippet: string, url: string): number {
+/**
+ * Heuristic score for a LinkedIn search result.
+ * Dept-specific titles score higher; pure generic HR penalised.
+ */
+function scoreResult(title: string, snippet: string, url: string, deptKeywords: string = ""): number {
   let score = 0;
   const t = title.toLowerCase();
   const s = snippet.toLowerCase();
+  const dept = deptKeywords.toLowerCase();
 
-  const keywords = ["manager","lead","head","senior","principal","director","vp","chief"];
-  for (const k of keywords) {
-    if (t.includes(k)) score += 2;
-    if (s.includes(k)) score += 1;
-  }
-
+  // URL quality
   if (url.includes("linkedin.com/in/")) score += 3;
   if (title.length > 0) score += 0.5;
+
+  // Seniority/leadership signals
+  const seniorityTerms = ["manager", "lead", "head", "director", "vp", "chief", "principal"];
+  for (const k of seniorityTerms) {
+    if (t.includes(k)) score += 2;
+    if (s.includes(k)) score += 0.5;
+  }
+
+  // Department relevance bonus — if the dept keywords appear in the title, strong signal
+  if (dept) {
+    const deptWords = dept.split(" ").filter(w => w.length > 2);
+    for (const dw of deptWords) {
+      if (t.includes(dw)) score += 6; // Strong boost for exact department match in title
+      if (s.includes(dw)) score += 1;
+    }
+  }
+
+  // Penalise pure generic HR (not department HR)
+  const isFounderScore = /\b(founder|co-founder|ceo|chief executive)\b/.test(t);
+  // Tightened: 'people' alone no longer triggers HR — requires specific HR role keywords
+  const isHRScore = /\b(human resources|talent acquisition|recruiter|hrbp|hr business partner|people partner|people ops|people operations)\b/.test(t + " " + s);
+  const hasDeptSignal = dept && dept.split(" ").some(w => w.length > 2 && t.includes(w));
+  if (isHRScore && !hasDeptSignal && !isFounderScore) score -= 5;
+
   return score;
+}
+
+async function searchYahooXRay(company: string, keywords: string = ""): Promise<SearchResult[]> {
+  const query = `site:linkedin.com/in ${company} ${keywords}`.trim();
+  const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query).replace(/%20/g, '+')}`;
+  
+  console.log(`[Yahoo OSINT] Querying: ${url}`);
+  
+  try {
+      const response = await fetch(url);
+      
+      const html = await response.text();
+      console.log(`[Yahoo OSINT] Response HTML length: ${html.length}`);
+      
+      const $ = cheerio.load(html);
+      const results: SearchResult[] = [];
+      
+      $('div.algo-sr').each((i, el) => {
+          const title = $(el).find('h3 a').text() || $(el).find('h3').text();
+          let link = $(el).find('h3 a').attr('href') || $(el).find('a').attr('href');
+          
+          if (title && link && link.includes('linkedin.com/in/')) {
+              const cleanTitle = title.split(' - ')[0].split(' | ')[0].trim();
+              if (link.includes('RU=')) {
+                  const ruMatch = link.match(/RU=([^/]+)\//);
+                  if (ruMatch) {
+                      link = decodeURIComponent(ruMatch[1]);
+                  }
+              }
+              results.push({ 
+                  title: cleanTitle, 
+                  url: link.split('?')[0].replace(/\/$/, ""),
+                  snippet: title,
+                  domain: "linkedin.com",
+                  score: 5 // Baseline OSINT score
+              });
+          }
+      });
+      
+      console.log(`[Yahoo OSINT] Found ${results.length} results`);
+      return results;
+  } catch (e) {
+      console.error('[Yahoo OSINT] Error fetching or parsing data:', e);
+      return [];
+  }
+}
+
+async function searchGitHubOSINT(company: string, keywords: string = ""): Promise<SearchResult[]> {
+  try {
+      console.log(`[GitHub OSINT] Searching for ${company}...`);
+      
+      const q = `${company} ${keywords}`.trim();
+      const response = await fetch(`https://api.github.com/search/users?q=${encodeURIComponent(q)}+type:user`, {
+          headers: {
+              'User-Agent': 'Node.js-OSINT-Script'
+          }
+      });
+
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      const users = data.items || [];
+      const results: SearchResult[] = [];
+
+      // Only fetch details for top 5 to avoid rate limits
+      for (const user of users.slice(0, 5)) {
+          const userResponse = await fetch(user.url, {
+              headers: { 'User-Agent': 'Node.js-OSINT-Script' }
+          });
+
+          if (userResponse.ok) {
+              const userData = await userResponse.json();
+              results.push({
+                  title: userData.name || userData.login,
+                  url: userData.html_url,
+                  snippet: `GitHub Bio: ${userData.bio || ''} | Company: ${userData.company || ''}`,
+                  domain: "github.com",
+                  score: 4 // Baseline OSINT score
+              });
+          }
+          await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      return results;
+  } catch (error) {
+      console.error("[GitHub OSINT] Error occurred:", error);
+      return [];
+  }
 }
 
 export async function searchCandidates(
@@ -92,8 +233,11 @@ export async function searchCandidates(
   excludeNames: string[] = [],
   jd: string = ""
 ): Promise<SearchResult[]> {
-  const { deptQuery, hrQuery } = buildQueries(company, jobTitle, excludeNames, jd);
+  const { deptQuery, hrQuery, deptKeywords } = buildQueries(company, jobTitle, excludeNames, jd);
   const serperKey = process.env.SERPER_API_KEY;
+
+  console.log(`[search] deptQuery: ${deptQuery}`);
+  console.log(`[search] hrQuery: ${hrQuery}`);
 
   if (!serperKey) {
     throw new Error("SERPER_API_KEY is not configured.");
@@ -111,31 +255,50 @@ export async function searchCandidates(
   }
 
   const [deptItems, hrItems] = await Promise.all([runQuery(deptQuery), runQuery(hrQuery)]);
-  const items = [...deptItems, ...hrItems];
-  
+
+  console.log(`[search] dept results: ${deptItems.length}, hr results: ${hrItems.length}`);
+
   const results: SearchResult[] = [];
   const seenUrls = new Set<string>();
 
-  for (const item of items) {
+  // Process dept results first (PRIORITY — scored with a +5 dept-priority bonus)
+  for (const item of deptItems) {
     let link = item.link || "";
     if (!link.includes("linkedin.com/in/")) continue;
     link = link.split("?")[0].replace(/\/$/, "");
     if (seenUrls.has(link)) continue;
     seenUrls.add(link);
-
     let cleanTitle = (item.title || "").split("-")[0].trim().split("|")[0].trim();
     results.push({
       url: link,
       title: cleanTitle,
       snippet: item.snippet || "",
       domain: "linkedin.com",
-      score: scoreResult(cleanTitle, item.snippet || "", link)
+      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords) + 5 // Dept priority boost
+    });
+  }
+
+  // Process HR results second (lower base priority)
+  for (const item of hrItems) {
+    let link = item.link || "";
+    if (!link.includes("linkedin.com/in/")) continue;
+    link = link.split("?")[0].replace(/\/$/, "");
+    if (seenUrls.has(link)) continue; // Skip if already in dept results
+    seenUrls.add(link);
+    let cleanTitle = (item.title || "").split("-")[0].trim().split("|")[0].trim();
+    results.push({
+      url: link,
+      title: cleanTitle,
+      snippet: item.snippet || "",
+      domain: "linkedin.com",
+      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords) // No priority boost for HR
     });
   }
 
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, 10);
 }
+
 
 export function extractContactsFromJD(jd: string): Array<{ name: string; context: string; email?: string }> {
   if (!jd) return [];
@@ -198,13 +361,27 @@ Return ONLY a JSON array with: name, title, role_type, confidence (0.0-1.0), rea
   try {
     const contacts = await askJSON<LLMContact[]>(prompt);
     const excludeSet = new Set((excludeNames || []).map(n => n.toLowerCase()));
-    return contacts
-      .filter(c => c.name && c.name.trim() && !excludeSet.has(c.name.toLowerCase()))
-      .map((c, idx) => ({
-        url: "", title: `${c.name} — ${c.title}`,
-        snippet: `⚠️ LLM-generated (unverified): ${c.role_type}: ${c.reason} (Confidence: ${Math.round(c.confidence * 100)}%)`,
-        domain: "linkedin.com", score: (contacts.length - idx) * 2 + (c.confidence * 5),
-      }));
+    const verified = contacts.filter(c => c.name && c.name.trim() && !excludeSet.has(c.name.toLowerCase()));
+    
+    // Sort by confidence descending
+    verified.sort((a, b) => b.confidence - a.confidence);
+
+    // If we have strong dept matches (>0.6), exclude HR entirely — they're a last resort
+    const hasDeptMatches = verified.some(c => c.confidence >= 0.85);
+    let finalCandidates = verified;
+    if (hasDeptMatches) {
+      // Strong dept people found — exclude HR and wrong dept
+      finalCandidates = verified.filter(c => c.confidence >= 0.8);
+    } else {
+      // No strong dept matches — keep anything above noise floor (drop only confirmed wrong dept)
+      finalCandidates = verified.filter(c => c.confidence >= 0.5);
+    }
+
+    return finalCandidates.slice(0, 5).map((c, idx) => ({
+      url: "", title: `${c.name} — ${c.title}`,
+      snippet: `⚠️ LLM-generated (unverified): ${c.role_type}: ${c.reason} (Confidence: ${Math.round(c.confidence * 100)}%)`,
+      domain: "linkedin.com", score: (finalCandidates.length - idx) * 2 + (c.confidence * 5),
+    }));
   } catch (err) {
     return [];
   }
@@ -225,32 +402,61 @@ export async function searchCandidatesAuto(
   const combinedExcludes = [...excludeNames, ...knownNames];
 
   let searchResults: SearchResult[] = [];
-  const serperKey = process.env.SERPER_API_KEY ?? "";
   let searchCalls = 0;
 
-  if (serperKey) {
-    try {
-      searchCalls += 2; // deptQuery and hrQuery
-      searchResults = await searchCandidates(company, jobTitle, combinedExcludes, jd);
-    } catch (err) {}
+  const { deptKeywords } = buildQueries(company, jobTitle, combinedExcludes, jd ?? "");
+  
+  // Extract primary search keyword to pass to the OSINT engine
+  let osintKeyword = "";
+  const titleLower = jobTitle.toLowerCase();
+  if (titleLower.includes("product") || titleLower.includes(" pm") || titleLower.includes("apm")) {
+    osintKeyword = "Product";
+  } else if (titleLower.includes("engineer") || titleLower.includes("developer")) {
+    osintKeyword = "Engineering";
+  } else if (titleLower.includes("data") || titleLower.includes("analyst")) {
+    osintKeyword = "Data";
+  } else if (titleLower.includes("design")) {
+    osintKeyword = "Design";
+  } else if (titleLower.includes("marketing")) {
+    osintKeyword = "Marketing";
+  } else if (titleLower.includes("sales")) {
+    osintKeyword = "Sales";
+  } else {
+    osintKeyword = deptKeywords.split(" ")[0] || "";
   }
 
+  try {
+    const [yahooResults, githubResults] = await Promise.all([
+      searchYahooXRay(company, osintKeyword),
+      searchGitHubOSINT(company, osintKeyword)
+    ]);
+    
+    searchResults = [...yahooResults, ...githubResults];
+    
+    // Rescore all OSINT results using our standard rubric to rank them properly
+    for (const res of searchResults) {
+      res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords);
+    }
+    
+    searchResults.sort((a, b) => b.score - a.score);
+  } catch (err) {
+    console.error("[search] OSINT engine failed:", err);
+  }
+
+  // Fallback to generic emails if STILL 0
   if (searchResults.length === 0) {
-    try {
-      const q = buildQueries(company, jobTitle, combinedExcludes, jd).deptQuery;
-      const ddgResults = await ddgSearch(q);
-      const seenUrls = new Set<string>();
-      for (const res of ddgResults.results) {
-        if (!res.url.includes("linkedin.com/in/")) continue;
-        const link = res.url.split("?")[0].replace(/\/$/, "");
-        if (seenUrls.has(link)) continue;
-        seenUrls.add(link);
-        const cleanTitle = res.title.split("-")[0].split("|")[0].trim();
-        searchResults.push({ url: link, title: cleanTitle, snippet: res.description || "", domain: "linkedin.com", score: scoreResult(cleanTitle, res.description || "", link) });
-      }
-      searchResults.sort((a, b) => b.score - a.score);
-      searchResults = searchResults.slice(0, 10);
-    } catch (e) {}
+    console.warn(`[search] Still 0 results for ${company}. Falling back to generic careers/hr emails.`);
+    const cleanDomainName = company.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    jdContacts.push({
+      name: "Careers Team",
+      email: `careers@${cleanDomainName}.com`,
+      context: "Fallback generic careers email"
+    });
+    jdContacts.push({
+      name: "HR Team",
+      email: `hr@${cleanDomainName}.com`,
+      context: "Fallback generic HR email"
+    });
   }
 
   // Strictly filter out excludeNames locally to fix the cycling bug
