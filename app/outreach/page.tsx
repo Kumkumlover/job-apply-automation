@@ -422,6 +422,8 @@ export default function OutreachPage() {
         const primaryEmail = emailParts[0];
         const bccEmails = emailParts.length > 1 ? emailParts.slice(1).join(", ") : undefined;
 
+        const candidate = candidates.find(c => c.name === name);
+
         const res = await fetch("/api/outreach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -431,10 +433,22 @@ export default function OutreachPage() {
             company: company.trim(),
             jobTitle: jobTitle.trim(),
             jd: jd.trim() || undefined,
+            profileUrl: candidate?.profile_url,
           }),
         });
 
-        if (!res.ok) continue;
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          newDrafts.push({
+            toEmail: primaryEmail,
+            bccEmails,
+            toName: name,
+            subject: `Failed to generate draft`,
+            htmlBody: `<p style="color: red;">Error: Generation failed or timed out. Please try again. ${errBody.slice(0, 100)}</p>`,
+            reason: "API Error or Timeout",
+          });
+          continue;
+        }
 
         const data = await res.json();
         newDrafts.push({

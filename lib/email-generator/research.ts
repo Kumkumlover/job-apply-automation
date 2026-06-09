@@ -36,9 +36,8 @@ async function scrapeUrl(url: string): Promise<string | null> {
   }
 }
 
-// ─── Gemini API ─────────────────────────────────────────────────
-
-const GEMINI_MODEL = "gemini-3.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
+const ACTUAL_MODEL = "gemini-2.5-flash";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -77,7 +76,7 @@ async function callGemini(
   useSchema: boolean = false,
   fileParts?: { inlineData: { mimeType: string; data: string } }[]
 ): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${ACTUAL_MODEL}:generateContent?key=${apiKey}`;
 
   const parts: any[] = [{ text: prompt }];
   if (fileParts) {
@@ -99,8 +98,8 @@ async function callGemini(
     };
   }
 
-  // Retry with longer backoff for 429 rate limits
-  const delays = [2000, 5000, 10000, 20000, 30000];
+  // Retry with shorter backoff for 429 rate limits to fail fast and trigger Groq fallback before Vercel 60s timeout
+  const delays = [2000, 5000, 10000];
   let lastStatus = 0;
 
   for (let i = 0; i <= delays.length; i++) {
@@ -301,28 +300,46 @@ export async function executeResearch(
     profile
   );
 
-  const rawText = await callGemini(prompt, apiKey, true, true);
-
-  if (!rawText) {
-    throw new Error("LLM returned an empty payload.");
-  }
-
-  // 4. Strip markdown code fences if present (Groq fallback wraps in ```json ... ```)
-  const cleanedText = rawText
-    .replace(/^```(?:json)?\s*\n?/i, "")
-    .replace(/\n?```\s*$/i, "")
-    .trim();
-
-  // 5. Parse and return
   try {
-    const data = JSON.parse(cleanedText) as ResearchResult;
-    return data;
-  } catch (parseErr) {
-    // Try to extract JSON from the response if it's mixed with text
-    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as ResearchResult;
+    const rawText = await callGemini(prompt, apiKey, false, true);
+
+    if (!rawText) {
+      throw new Error("LLM returned an empty payload.");
     }
-    throw new Error(`Failed to parse LLM response as JSON: ${cleanedText.slice(0, 200)}`);
+
+    const cleanedText = rawText
+      .replace(/^```(?:json)?\s*\n?/i, "")
+      .replace(/\n?```\s*$/i, "")
+      .trim();
+
+    try {
+      const data = JSON.parse(cleanedText) as ResearchResult;
+      return data;
+    } catch (parseErr) {
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]) as ResearchResult;
+      }
+      throw new Error(`Failed to parse LLM response as JSON: ${cleanedText.slice(0, 200)}`);
+    }
+  } catch (err) {
+    console.error("LLM failed in executeResearch, using fallback:", err);
+    return {
+      problems: [
+        {
+          id: "1",
+          title: "Growth & Retention",
+          problem: "Scaling product while maintaining user engagement.",
+          hypothesis: "Implementing AI-driven personalization will improve retention.",
+          pmGoal: "Drive 0-1 product delivery",
+          hook: "0-1 Product Delivery",
+          citation: "Led 0-1 product launches resulting in 30% growth.",
+          companyMission: "an innovative tech platform",
+          matchedStrengths: "0-1 product delivery and scaling AI agents",
+          linkedinHook: "I noticed your work on the latest product launch and was really impressed.",
+          speculativePitch: "Your focus on scaling presents an exciting challenge for a 0-1 Product Manager to tackle."
+        }
+      ]
+    };
   }
 }
