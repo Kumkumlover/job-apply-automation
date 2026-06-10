@@ -24,6 +24,7 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  FileText,
 } from "lucide-react";
 import { UsageTracker, type LocalUsage } from "@/components/usage-tracker";
 
@@ -60,10 +61,11 @@ interface EmailDraft {
   toName: string;
   subject: string;
   htmlBody: string;
+  rawText?: string;
   reason: string;
 }
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 type PhaseStatus = "idle" | "loading" | "success" | "error";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -148,7 +150,11 @@ export default function OutreachPage() {
   const [emailResults, setEmailResults] = useState<PersonResult[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Map<string, string>>(new Map());
 
-  // Step 4: Draft & Send
+  // Step 4: Template
+  const [masterDrafts, setMasterDrafts] = useState<(EmailDraft & { problemTitle?: string })[]>([]);
+  const [selectedMasterIdx, setSelectedMasterIdx] = useState<number>(0);
+
+  // Step 5: Draft & Send
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [editingDraftIdx, setEditingDraftIdx] = useState<number | null>(null);
   const [editSubject, setEditSubject] = useState("");
@@ -216,6 +222,8 @@ export default function OutreachPage() {
     setSelectedContacts(new Set());
     setEmailResults([]);
     setSelectedEmails(new Map());
+    setMasterDrafts([]);
+    setSelectedMasterIdx(0);
     setDrafts([]);
     setEditingDraftIdx(null);
     setEditSubject("");
@@ -414,55 +422,45 @@ export default function OutreachPage() {
     setError("");
 
     try {
-      const newDrafts: EmailDraft[] = [];
+      const firstTargetName = targets[0][0];
+      const candidate = candidates.find(c => c.name === firstTargetName);
 
-      for (const [name, emailsStr] of targets) {
-        // Parse the primary and BCC emails
-        const emailParts = emailsStr.split("|");
-        const primaryEmail = emailParts[0];
-        const bccEmails = emailParts.length > 1 ? emailParts.slice(1).join(", ") : undefined;
+      const res = await fetch("/api/outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate-email",
+          recipientName: "{{contactName}}", // Force template placeholder
+          company: company.trim(),
+          jobTitle: jobTitle.trim(),
+          jd: jd.trim() || undefined,
+          profileUrl: candidate?.profile_url,
+        }),
+      });
 
-        const candidate = candidates.find(c => c.name === name);
-
-        const res = await fetch("/api/outreach", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "generate-email",
-            recipientName: name.split(" ")[0], // First name only
-            company: company.trim(),
-            jobTitle: jobTitle.trim(),
-            jd: jd.trim() || undefined,
-            profileUrl: candidate?.profile_url,
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.text().catch(() => "");
-          newDrafts.push({
-            toEmail: primaryEmail,
-            bccEmails,
-            toName: name,
-            subject: `Failed to generate draft`,
-            htmlBody: `<p style="color: red;">Error: Generation failed or timed out. Please try again. ${errBody.slice(0, 100)}</p>`,
-            reason: "API Error or Timeout",
-          });
-          continue;
-        }
-
-        const data = await res.json();
-        newDrafts.push({
-          toEmail: primaryEmail,
-          bccEmails,
-          toName: name,
-          subject: data.subject,
-          htmlBody: data.htmlBody,
-          reason: data.reason,
-        });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(`Error generating master template: ${errBody.slice(0, 100)}`);
       }
 
-      setDrafts(newDrafts);
-      setSendStatus(new Map(newDrafts.map((d) => [d.toEmail, "idle"])));
+      const data = await res.json();
+      
+      if (data.drafts && data.drafts.length > 0) {
+        setMasterDrafts(data.drafts.map((d: any) => ({
+          toEmail: "", // Will be assigned per person
+          bccEmails: "",
+          toName: "",
+          subject: d.subject,
+          htmlBody: d.htmlBody,
+          rawText: d.rawText,
+          reason: d.reason,
+          problemTitle: d.problemTitle,
+        })));
+      } else {
+        throw new Error("No drafts returned from API");
+      }
+      setSelectedMasterIdx(0);
+
       setStep(4);
       setPhaseStatus("success");
       setLoadingAction(null);
@@ -471,6 +469,59 @@ export default function OutreachPage() {
       setPhaseStatus("error");
       setLoadingAction(null);
     }
+  };
+
+  // ── Step 4: Apply Master Draft ──
+
+  const handleApproveMasterDraft = () => {
+    if (masterDrafts.length === 0) return;
+    const masterDraft = masterDrafts[selectedMasterIdx];
+
+    let formattedHtmlBody = masterDraft.htmlBody;
+    if (masterDraft.rawText) {
+      let htmlBody = `<body style="font-family: Arial, Helvetica, sans-serif; color: #000; line-height: 1.5; font-size: 14px;">\n`;
+      const paragraphs = masterDraft.rawText.split("\n\n");
+      for (const para of paragraphs) {
+        if (para.includes("• ")) {
+          htmlBody += `  <ul style="margin: 0; padding-left: 20px;">\n`;
+          const lines = para.split("\n").filter(l => l.trim());
+          for (const line of lines) {
+            htmlBody += `    <li style="margin-bottom: 8px; margin-left: 15px;">${line.replace("• ", "")}</li>\n`;
+          }
+          htmlBody += `  </ul>\n`;
+        } else {
+          const formattedPara = para.split("\n").join("<br>");
+          htmlBody += `  <p>${formattedPara}</p>\n`;
+        }
+      }
+      
+      htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+      htmlBody += `</body>`;
+      formattedHtmlBody = htmlBody;
+    }
+
+    const targets = Array.from(selectedEmails.entries()).filter(([_, email]) => email);
+    const newDrafts: EmailDraft[] = [];
+
+    for (const [name, emailsStr] of targets) {
+      const emailParts = emailsStr.split("|");
+      const primaryEmail = emailParts[0];
+      const bccEmails = emailParts.length > 1 ? emailParts.slice(1).join(", ") : undefined;
+      const firstName = name.split(" ")[0];
+
+      newDrafts.push({
+        toEmail: primaryEmail,
+        bccEmails,
+        toName: name,
+        subject: masterDraft.subject,
+        htmlBody: formattedHtmlBody.replace(/\{\{contactName\}\}/g, firstName),
+        reason: masterDraft.reason,
+      });
+    }
+
+    setDrafts(newDrafts);
+    setSendStatus(new Map(newDrafts.map((d) => [d.toEmail, "idle"])));
+    setStep(5);
   };
 
   // ── Step 4: Send Email ──
@@ -937,15 +988,96 @@ export default function OutreachPage() {
                   <Sparkles className="w-5 h-5" />
                 )}
                 {phaseStatus === "loading" && loadingAction === "drafts"
-                  ? "Generating Personalized Emails..."
-                  : `Generate Outreach for ${selectedEmails.size} Contact${selectedEmails.size !== 1 ? "s" : ""}`}
+                  ? "Generating Master Template..."
+                  : "Generate Master Template"}
               </button>
             </div>
           </div>
         )}
 
-        {/* ═══════ STEP 4: REVIEW & SEND ═══════ */}
-        {step === 4 && (
+        {/* ═══════ STEP 4: MASTER TEMPLATE ═══════ */}
+        {step === 4 && masterDrafts.length > 0 && (
+          <div className="bg-[#111113] rounded-2xl p-6 border border-[#1e1e22] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-center gap-3 pb-4 border-b border-[#1e1e22]">
+              <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">Master Template Options</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Select an option, review, and edit. We will replace <code className="text-indigo-400 font-mono text-[10px]">{"{{contactName}}"}</code> with each person's first name.
+                </p>
+              </div>
+            </div>
+
+            {/* Template Selection Tabs */}
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+              {masterDrafts.map((draft, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setSelectedMasterIdx(idx)}
+                  className={`flex-shrink-0 px-4 py-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    selectedMasterIdx === idx
+                      ? "bg-indigo-600/10 border-indigo-500/30 text-indigo-300"
+                      : "bg-[#0a0a0b] border-[#1e1e22] text-slate-500 hover:border-slate-700"
+                  }`}
+                  style={{ minWidth: "160px" }}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Option {idx + 1}</span>
+                  <span className="text-xs font-medium truncate w-full" title={draft.problemTitle || "Template"}>
+                    {draft.problemTitle || "Template Option"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-4 bg-[#060608] p-5 rounded-xl border border-[#1e1e22]">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Subject</label>
+                <input
+                  type="text"
+                  value={masterDrafts[selectedMasterIdx].subject}
+                  onChange={(e) => {
+                    const updated = [...masterDrafts];
+                    updated[selectedMasterIdx].subject = e.target.value;
+                    setMasterDrafts(updated);
+                  }}
+                  className="w-full bg-[#0a0a0b] border border-[#2a2a30] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Email Body</label>
+                <textarea
+                  value={masterDrafts[selectedMasterIdx].rawText !== undefined ? masterDrafts[selectedMasterIdx].rawText : masterDrafts[selectedMasterIdx].htmlBody}
+                  onChange={(e) => {
+                    const updated = [...masterDrafts];
+                    if (updated[selectedMasterIdx].rawText !== undefined) {
+                      updated[selectedMasterIdx].rawText = e.target.value;
+                    } else {
+                      updated[selectedMasterIdx].htmlBody = e.target.value;
+                    }
+                    setMasterDrafts(updated);
+                  }}
+                  rows={15}
+                  className="w-full bg-[#0a0a0b] border border-[#2a2a30] rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end pt-4 border-t border-[#1e1e22]">
+              <button
+                onClick={handleApproveMasterDraft}
+                className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-xl font-bold uppercase text-[11px] tracking-widest hover:bg-emerald-500 transition-colors"
+              >
+                <CheckCircle className="w-4 h-4" />
+                Approve & Generate {Array.from(selectedEmails.entries()).filter(([_, e]) => e).length} Drafts
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ STEP 5: REVIEW & SEND ═══════ */}
+        {step === 5 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -958,7 +1090,7 @@ export default function OutreachPage() {
                 </div>
               </div>
               <button
-                onClick={() => setStep(3)}
+                onClick={() => setStep(4)}
                 className="text-xs text-indigo-400 border border-indigo-500/20 px-3 py-1.5 rounded-lg hover:bg-indigo-500/10"
               >
                 ← Back

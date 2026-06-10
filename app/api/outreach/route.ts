@@ -213,59 +213,59 @@ async function handleGenerateEmail(body: {
     throw new Error("Research pipeline failed to generate hypotheses.");
   }
 
-  const problem = research.problems[0]; // Pick the highest confidence hypothesis
+  const drafts = await Promise.all(research.problems.slice(0, 3).map(async (problem) => {
+    // Step 2: Use the exact templates the user built
+    const rawText = await generateCopy(
+      problem,
+      "Cold Email", // default format
+      recipientName,
+      company,
+      jobTitle,
+      profile || undefined
+    );
 
-  if (!problem) {
-    throw new Error("Research pipeline failed to generate hypotheses.");
-  }
-
-  // Step 2: Use the exact templates the user built
-  const rawText = await generateCopy(
-    problem,
-    "Cold Email", // default format
-    recipientName,
-    company,
-    jobTitle,
-    profile || undefined
-  );
-
-  // Step 3: Parse the raw text template into beautifully formatted HTML
-  // We will replace the default links at the bottom with the clean inline sentence requested earlier.
-  let htmlBody = `<body style="font-family: Arial, Helvetica, sans-serif; color: #000; line-height: 1.5; font-size: 14px;">\n`;
-  
-  const sections = rawText.split("For your reference:");
-  const mainBody = sections[0].trim();
-  
-  const paragraphs = mainBody.split("\n\n");
-  for (const para of paragraphs) {
-    if (para.includes("• ")) {
-      htmlBody += `  <ul style="margin: 0; padding-left: 20px;">\n`;
-      const lines = para.split("\n").filter(l => l.trim());
-      for (const line of lines) {
-        htmlBody += `    <li style="margin-bottom: 8px; margin-left: 15px;">${line.replace("• ", "")}</li>\n`;
+    // Step 3: Parse the raw text template into beautifully formatted HTML
+    let htmlBody = `<body style="font-family: Arial, Helvetica, sans-serif; color: #000; line-height: 1.5; font-size: 14px;">\n`;
+    
+    const sections = rawText.split("For your reference:");
+    const mainBody = sections[0].trim();
+    
+    const paragraphs = mainBody.split("\n\n");
+    for (const para of paragraphs) {
+      if (para.includes("• ")) {
+        htmlBody += `  <ul style="margin: 0; padding-left: 20px;">\n`;
+        const lines = para.split("\n").filter(l => l.trim());
+        for (const line of lines) {
+          htmlBody += `    <li style="margin-bottom: 8px; margin-left: 15px;">${line.replace("• ", "")}</li>\n`;
+        }
+        htmlBody += `  </ul>\n`;
+      } else {
+        const formattedPara = para.split("\n").join("<br>");
+        htmlBody += `  <p>${formattedPara}</p>\n`;
       }
-      htmlBody += `  </ul>\n`;
-    } else {
-      const formattedPara = para.split("\n").join("<br>");
-      htmlBody += `  <p>${formattedPara}</p>\n`;
     }
-  }
 
-  // Inject the clean inline reference links
-  htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
-  if (profileUrl) {
-    htmlBody += `  <div data-linkedin-url="${profileUrl}" style="display:none;">${profileUrl}</div>\n`;
-  }
-  htmlBody += `</body>`;
+    // Inject the clean inline reference links
+    htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+    if (profileUrl) {
+      htmlBody += `  <div data-linkedin-url="${profileUrl}" style="display:none;">${profileUrl}</div>\n`;
+    }
+    htmlBody += `</body>`;
 
-  // Generate subject
-  const subject = `Application: ${jobTitle} — ${company}`;
+    // Generate subject
+    const subject = `Application: ${jobTitle} — ${company}`;
+
+    return {
+      subject,
+      htmlBody,
+      rawText: mainBody, // Pass the clean raw text for UI editing
+      reason: problem.hypothesis, // Pass back hypothesis as context
+      problemTitle: problem.title || "Option",
+    };
+  }));
 
   return NextResponse.json({
-    subject,
-    htmlBody,
-    reason: problem.hypothesis, // Pass back hypothesis as context
-    recipientName,
+    drafts,
   });
 }
 
