@@ -23,6 +23,7 @@ export const applyPipeline = inngest.createFunction(
   {
     id: "job-apply-pipeline",
     retries: 1,
+    concurrency: 1,
     triggers: [{ event: "app/job.apply" }],
   },
   async ({ event, step }: { event: { data: ApplyPayload }; step: any }) => {
@@ -134,7 +135,8 @@ export const applyPipeline = inngest.createFunction(
         validResult.candidate.candidate_name,
         reason,
         payload.company,
-        payload.job_title
+        payload.job_title,
+        validResult.candidate.profile_url ?? undefined
       );
       return await sendOutboundEmail({
         to_email: validResult.candidate.email,
@@ -143,6 +145,7 @@ export const applyPipeline = inngest.createFunction(
         html_body: html,
         company: payload.company,
         job_title: payload.job_title,
+        profile_url: validResult.candidate.profile_url ?? undefined,
       });
     });
 

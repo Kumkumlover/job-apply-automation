@@ -111,7 +111,6 @@ function buildGmailDraftUrl(draft: EmailDraft): string {
     fs: "1",
     to: draft.toEmail,
     su: draft.subject,
-    body: plainBody,
   });
 
   if (draft.bccEmails) {
@@ -161,6 +160,7 @@ export default function OutreachPage() {
   const [editBody, setEditBody] = useState("");
   const [sendStatus, setSendStatus] = useState<Map<string, "idle" | "sending" | "sent" | "error">>(new Map());
   const [copied, setCopied] = useState<string | null>(null);
+  const [isGmailConnected, setIsGmailConnected] = useState(false);
 
   // Live API Usage Tracker State
   const [localUsage, setLocalUsage] = useState<LocalUsage>({ search: 0, apollo: 0, hunter: 0 });
@@ -196,6 +196,13 @@ export default function OutreachPage() {
     if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
     const savedStep = localStorage.getItem("outreach_step");
     if (savedStep) setStep(Number(savedStep) as Step);
+
+    fetch("/api/gmail/status")
+      .then(res => res.json())
+      .then(data => {
+        if (data.connected) setIsGmailConnected(true);
+      })
+      .catch(console.error);
   }, []);
 
   // Save state on change
@@ -561,10 +568,56 @@ export default function OutreachPage() {
     setEditingDraftIdx(null);
   };
 
-  const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
+  const handleCopyHtml = async (draft: EmailDraft, id: string) => {
+    try {
+      const plainText = draft.htmlBody.replace(/<[^>]*>/g, "");
+      const htmlBlob = new Blob([draft.htmlBody], { type: "text/html" });
+      const plainBlob = new Blob([plainText], { type: "text/plain" });
+      const item = new ClipboardItem({
+        "text/html": htmlBlob,
+        "text/plain": plainBlob,
+      });
+      await navigator.clipboard.write([item]);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy rich text", err);
+      // Fallback
+      const plainText = draft.htmlBody.replace(/<[^>]*>/g, "");
+      navigator.clipboard.writeText(plainText);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    }
+  };
+
+  const handleOpenInGmail = async (draft: EmailDraft) => {
+    // 1. Copy the rich text HTML to clipboard so the user can easily paste it.
+    await handleCopyHtml(draft, draft.toEmail + "_gmail");
+    // 2. Open Gmail compose window with empty body (since it doesn't support HTML)
+    window.open(buildGmailDraftUrl(draft), "_blank", "noopener,noreferrer");
+  };
+
+  const handleCreateApiDraft = async (draft: EmailDraft) => {
+    try {
+      setSendStatus((prev) => new Map(prev).set(draft.toEmail, "sending"));
+      
+      const res = await fetch("/api/gmail/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toEmail: draft.toEmail,
+          bccEmails: draft.bccEmails,
+          subject: draft.subject,
+          htmlBody: draft.htmlBody,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create draft");
+
+      setSendStatus((prev) => new Map(prev).set(draft.toEmail, "sent"));
+    } catch {
+      setSendStatus((prev) => new Map(prev).set(draft.toEmail, "error"));
+    }
   };
 
   // ── Step indicator ──
@@ -1089,12 +1142,26 @@ export default function OutreachPage() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setStep(4)}
-                className="text-xs text-indigo-400 border border-indigo-500/20 px-3 py-1.5 rounded-lg hover:bg-indigo-500/10"
-              >
-                ← Back
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setStep(4)}
+                  className="text-xs text-indigo-400 border border-indigo-500/20 px-3 py-1.5 rounded-lg hover:bg-indigo-500/10"
+                >
+                  ← Back
+                </button>
+                {!isGmailConnected ? (
+                  <button
+                    onClick={() => { window.location.href = "/api/auth/google/login?redirect=/outreach"; }}
+                    className="text-xs text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-500 flex items-center gap-2"
+                  >
+                    <Mail className="w-3 h-3" /> Connect Gmail
+                  </button>
+                ) : (
+                  <span className="text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 flex items-center gap-1.5">
+                    <CheckCircle className="w-3 h-3" /> Gmail Connected
+                  </span>
+                )}
+              </div>
             </div>
 
             {drafts.map((draft, idx) => {
@@ -1200,18 +1267,38 @@ export default function OutreachPage() {
                         </button>
 
                         {/* Open in Gmail Draft */}
-                        <a
-                          href={buildGmailDraftUrl(draft)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-4 py-2.5 bg-[#1e1e22] hover:bg-[#2a2a30] text-slate-300 text-sm rounded-lg border border-[#2a2a30] transition-all"
-                        >
-                          <ExternalLink className="w-4 h-4" /> Open in Gmail
-                        </a>
+                        {isGmailConnected ? (
+                          <button
+                            onClick={() => handleCreateApiDraft(draft)}
+                            disabled={status === "sending" || status === "sent"}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm rounded-lg border border-blue-500/30 transition-all disabled:opacity-40"
+                          >
+                            {status === "sending" ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : status === "sent" ? (
+                              <CheckCircle className="w-4 h-4 text-blue-400" />
+                            ) : (
+                              <Mail className="w-4 h-4" />
+                            )}
+                            {status === "sending" ? "Drafting..." : status === "sent" ? "Draft Created" : "Create API Draft"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleOpenInGmail(draft)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-[#1e1e22] hover:bg-[#2a2a30] text-slate-300 text-sm rounded-lg border border-[#2a2a30] transition-all"
+                          >
+                            {copied === draft.toEmail + "_gmail" ? (
+                              <CheckCircle className="w-4 h-4 text-emerald-400" />
+                            ) : (
+                              <ExternalLink className="w-4 h-4" />
+                            )}
+                            {copied === draft.toEmail + "_gmail" ? "Copied! Paste in Gmail" : "Open in Gmail"}
+                          </button>
+                        )}
 
                         {/* Copy */}
                         <button
-                          onClick={() => handleCopy(draft.htmlBody.replace(/<[^>]*>/g, ""), draft.toEmail)}
+                          onClick={() => handleCopyHtml(draft, draft.toEmail)}
                           className="flex items-center gap-2 px-4 py-2.5 bg-[#1e1e22] hover:bg-[#2a2a30] text-slate-300 text-sm rounded-lg border border-[#2a2a30] transition-all"
                         >
                           {copied === draft.toEmail ? (

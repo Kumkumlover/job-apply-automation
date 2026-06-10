@@ -6,6 +6,7 @@
 
 import { askJSON } from "../llm";
 import type { SearchResult, RankedCandidate } from "../types";
+import { extractDeptKeywords, deptRelevanceScore, detectWrongDept } from "./dept-utils";
 
 interface RankResponse {
   topCandidates: RankedCandidate[];
@@ -19,48 +20,83 @@ export async function rankCandidates(
 ): Promise<RankedCandidate[]> {
   if (!results.length) return [];
 
-  const prompt = `You are helping me find likely hiring managers or HR contacts for a job.
+  const companyLower = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const verified: RankedCandidate[] = [];
+  const deptKeywords = extractDeptKeywords(jobTitle);
 
-Context:
-- Company: ${company}
-- Job title / role: ${jobTitle}
-- JD: ${jd || "No detailed JD given"}
+  for (const r of results) {
+    const text = (r.title + " " + r.snippet).toLowerCase();
+    
+    // Check if the snippet or title contains the company name
+    // (fuzzy match for company by taking first word if it's long)
+    const companyFirstWord = company.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    const worksAtCompany = text.includes(companyLower) || (companyFirstWord.length > 2 && text.includes(companyFirstWord));
+    
+    if (!worksAtCompany) continue;
 
-Here is a JSON array of search results (each has name-from-url, url, title, snippet, score):
-${JSON.stringify(results, null, 2)}
+    const isFounder = /\b(founder|co-founder|ceo|chief executive)\b/.test(text);
+    // Tightened: 'people' alone no longer triggers HR — requires specific HR role keywords
+    const isHR = /\b(human resources|talent acquisition|recruiter|hrbp|hr business partner|people partner|people ops|people operations)\b/.test(text);
 
-Task:
-1. Pick up to 5 people most likely to be the hiring manager, team lead, or recruiter for this role.
-2. CRITICAL RULES for selection:
-   - READ THE SNIPPET CAREFULLY. If the snippet contains an end date in the past (e.g., "Jun 2023 - Jul 2025" or anything implying they left), or says "Ex-", "Former", or "Past", DO NOT PICK THEM.
-   - CHECK THE "Present" KEYWORD. If the snippet shows the word "Present" associated with a DIFFERENT company name (e.g. "Agilitas... Present... SalarySe... 1 year"), this means they currently work at the other company and are an ex-employee of ${company}. DO NOT PICK THEM.
-   - Make absolutely sure the person CURRENTLY belongs to the company ${company} (Do not pick ex-employees or false positives).
-   - Prioritize people in the exact same department mentioned in the JD (e.g., Product, Platform and Cards).
-   - Prioritize HRs or Recruiters of that company who hire for that department.
-   - If the model cannot find anyone in those categories, at least ensure they are currently at the company and are in HR or a similar role.
-4. For each, decide:
-   - current_company_analysis: analyze the snippet step-by-step to determine which company they currently work at (look at where "Present" is attached). If it's not ${company}, EXCLUDE THEM.
-   - role_type: one of "hiring_manager", "team_lead", "recruiter_hr", "other"
-   - confidence: 0.0 to 1.0
-   - reason: 1-2 short bullet points why they are the best contact
+    const relevance = deptRelevanceScore(text, deptKeywords);
+    const wrongDeptLabel = detectWrongDept(text);
 
-Return ONLY valid JSON in this exact shape:
-{
-  "topCandidates": [
-    {
-      "name": "...",
-      "profile_url": "...",
-      "current_title": "...",
-      "current_company_analysis": "...",
-      "role_type": "hiring_manager",
-      "confidence": 0.0,
-      "reason": "point 1; point 2"
+    let isValid = false;
+    let confidence = 0.5;
+    let reason = "";
+    let role_type: "hiring_manager" | "team_lead" | "recruiter_hr" | "other" = "other";
+
+    if (relevance > 0) {
+      isValid = true;
+      confidence = 0.85;
+      role_type = "hiring_manager";
+      reason = `Matches target department keywords`;
+    } else if (isFounder) {
+      isValid = true;
+      confidence = 0.8;
+      role_type = "hiring_manager";
+      reason = "Founder/CEO - always acceptable";
+    } else if (isHR) {
+      isValid = true;
+      confidence = 0.6;
+      role_type = "recruiter_hr";
+      reason = "Recruiter/HR fallback";
+    } else if (relevance === 0 && !wrongDeptLabel && /manager|lead|director|head|vp|chief/.test(text)) {
+      isValid = true;
+      confidence = 0.5;
+      role_type = "hiring_manager";
+      reason = "Generic manager - neutral department";
+    } else if (wrongDeptLabel && /manager|lead|director|head|vp|chief/.test(text)) {
+      isValid = true;
+      confidence = 0.2;
+      role_type = "hiring_manager";
+      reason = `Wrong department (${wrongDeptLabel}) - last resort`;
     }
-  ]
-}
 
-No extra keys, comments, or prose. Just valid JSON.`;
+    if (isValid) {
+      verified.push({
+        name: r.title.split(/[-—|]/)[0].trim(),
+        profile_url: (r as any).url || (r as any).link || '',
+        current_title: r.snippet.substring(0, 50).trim(),
+        role_type,
+        confidence,
+        reason: `Verified: ${reason}`
+      });
+    }
+  }
 
-  const parsed = await askJSON<RankResponse>(prompt);
-  return parsed.topCandidates ?? [];
+  // Sort by confidence descending
+  verified.sort((a, b) => b.confidence - a.confidence);
+
+  // If we have strong dept matches (>=0.85), exclude HR (0.6) entirely—they're a last resort only
+  const hasDeptMatches = verified.some(c => c.confidence >= 0.85);
+  let finalCandidates = verified;
+  if (hasDeptMatches) {
+    finalCandidates = verified.filter(c => c.confidence >= 0.8);
+  } else {
+    // No strong dept matches—keep founders and HR, drop only confirmed wrong-dept people
+    finalCandidates = verified.filter(c => c.confidence >= 0.5);
+  }
+
+  return finalCandidates.slice(0, 5);
 }

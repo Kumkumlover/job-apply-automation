@@ -74,4 +74,5 @@ export interface OutboundEmail {
   html_body: string;
   company: string;
   job_title: string;
+  profile_url?: string;
 }

@@ -291,7 +291,10 @@ async function hunterLookup(
   lastName: string,
   apiKey: string
 ): Promise<{ email: string; source: string } | null> {
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn(`[Hunter] Skipped for ${domain} — no API key provided.`);
+    return null;
+  }
 
   try {
     const params = new URLSearchParams({
@@ -307,20 +310,20 @@ async function hunterLookup(
         "Accept": "application/json"
       }
     });
-    console.log(`Hunter lookup for ${domain}: status ${res.status}`);
+    console.log(`[Hunter] lookup for ${firstName} ${lastName} @ ${domain}: status ${res.status}`);
     
     if (!res.ok) {
-      console.log(`Hunter error: ${await res.text()}`);
+      console.warn(`[Hunter] Error response: ${await res.text()}`);
       return null;
     }
 
     const data = await res.json();
-    console.log(`Hunter response data: ${JSON.stringify(data).substring(0, 100)}`);
+    console.log(`[Hunter] response: ${JSON.stringify(data).substring(0, 150)}`);
     if (!data?.data?.email) return null;
 
     return { email: data.data.email, source: "Hunter.io" };
   } catch (error) {
-    console.log(`Hunter exception:`, error);
+    console.error(`[Hunter] Exception for ${domain}:`, error);
     return null;
   }
 }
@@ -331,7 +334,10 @@ async function apolloLookup(
   domain: string,
   apiKey: string
 ): Promise<{ email: string; source: string } | null> {
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn(`[Apollo] Skipped for ${name} @ ${domain} — no API key provided.`);
+    return null;
+  }
 
   try {
     const res = await fetch("https://api.apollo.io/v1/people/match", {
@@ -339,7 +345,8 @@ async function apolloLookup(
       headers: { 
         "Content-Type": "application/json", 
         "Cache-Control": "no-cache",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "X-Api-Key": apiKey
       },
       body: JSON.stringify({
         api_key: apiKey,
@@ -349,13 +356,20 @@ async function apolloLookup(
       }),
     });
 
-    if (!res.ok) return null;
+    console.log(`[Apollo] lookup for ${name} @ ${domain}: status ${res.status}`);
+
+    if (!res.ok) {
+      console.warn(`[Apollo] Error response for ${name}: ${await res.text()}`);
+      return null;
+    }
 
     const data = await res.json();
+    console.log(`[Apollo] response for ${name}: ${JSON.stringify(data?.person?.email ?? 'no email').substring(0, 100)}`);
     if (!data?.person?.email) return null;
 
     return { email: data.person.email, source: "Apollo.io" };
-  } catch {
+  } catch (err) {
+    console.error(`[Apollo] Exception for ${name} @ ${domain}:`, err);
     return null;
   }
 }
@@ -453,20 +467,25 @@ async function processPerson(
   const verifiedCount = new Set(allDomainEmails.filter(c => c.verified).map(c => c.name)).size;
 
   // 1.5 Pattern Engine Fast-Path (0 Credits)
-  // If we already know the exact pattern for this domain (e.g. from JD contacts), use it instantly!
+  // ONLY use this shortcut if we have 2+ verified emails that came from REAL APIs (Hunter/Apollo)
+  // NOT just from JD extraction or LLM guesses — those don't verify the domain pattern reliably.
   const topPatterns = await getTopPatterns(domain, 5);
   let fastPathFound = false;
   
-  if (topPatterns.length > 0) {
+  const apiVerifiedCount = new Set(
+    allDomainEmails
+      .filter(c => c.verified && (c.source === "Hunter.io" || c.source === "Apollo.io" || c.source === "Public Web Search"))
+      .map(c => c.name)
+  ).size;
+
+  if (topPatterns.length > 0 && apiVerifiedCount >= 2) {
     const bestPattern = topPatterns[0];
-    // If the pattern has a high success rate and we have at least 2 verified emails (locked domain), trust it
-    if (verifiedCount >= 2 && bestPattern.usageCount > 0 && (bestPattern.successCount / bestPattern.usageCount) >= 0.90) {
+    if (bestPattern.usageCount > 0 && (bestPattern.successCount / bestPattern.usageCount) >= 0.90) {
       const allPerms = generatePermutations(first, last, domain);
       const matchedPerm = allPerms.find(p => p.pattern === bestPattern.pattern);
       
       if (matchedPerm) {
-        // Skip validation entirely for 90%+ confidence patterns (e.g. from JD) to prevent Vercel 504 timeouts!
-        // We know the domain exists because the pattern was already seeded and verified.
+        console.log(`[email-finder] Fast-path for ${person.name}: ${matchedPerm.email} (pattern ${bestPattern.pattern}, ${apiVerifiedCount} API-verified emails on domain)`);
         await store.saveEmail(matchedPerm.email, resolvedPerson.name, domain, matchedPerm.pattern, 0.99, "Pattern Engine", false);
         await store.recordPatternSuccess(matchedPerm.pattern, domain);
         
@@ -532,18 +551,8 @@ async function processPerson(
     ]);
   }
 
-  // 4. Deep LLM Knowledge Search (Free, Slow fallback)
-  const llmEmail = await llmDeepEmailSearch(resolvedPerson.name, resolvedPerson.company, domain);
-  if (llmEmail) {
-    const pattern = extractPattern(first, last, llmEmail.split("@")[0]);
-    await store.saveEmail(llmEmail, resolvedPerson.name, domain, pattern, 0.88, "Deep LLM Search", true);
-    await store.recordPatternSuccess(pattern, domain);
-
-    return formatOutput(resolvedPerson, [
-      { email: llmEmail, type: "verified", confidence: 0.88, source: "Deep LLM Search" },
-    ]);
-  }
-
+  // Deep LLM Knowledge Search removed to prevent hallucinations.
+  // We fall through directly to the Pattern Engine.
 
 
   // If API lookups failed but we had cached predictions, return them now to avoid regenerating

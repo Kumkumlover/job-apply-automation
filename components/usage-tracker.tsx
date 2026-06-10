@@ -29,7 +29,7 @@ interface UsageTrackerProps {
 export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerProps) {
   const [globalUsage, setGlobalUsage] = useState<GlobalUsage | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
 
   const fetchGlobalUsage = async () => {
     if (!hunterKey && !apolloKey) return;
@@ -57,8 +57,10 @@ export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerP
     fetchGlobalUsage();
   }, [hunterKey, apolloKey]);
 
-  // Always show the widget toggle so the user knows they need to input keys
-
+  // Hide if no keys and 0 usage
+  if (!hunterKey && !apolloKey && localUsage.search === 0 && localUsage.apollo === 0 && localUsage.hunter === 0) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 font-sans">

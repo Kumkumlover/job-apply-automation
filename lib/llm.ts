@@ -31,7 +31,7 @@ function getDefaultModel(provider: Provider): string {
   switch (provider) {
     case "groq":   return "llama-3.3-70b-versatile";
     case "ollama": return process.env.OLLAMA_MODEL ?? "llama3.2";
-    case "gemini": return "gemini-1.5-flash";
+    case "gemini": return "gemini-2.5-flash";
   }
 }
 
@@ -73,17 +73,28 @@ function getClient() {
 }
 
 /** Call the LLM and return the raw text response */
-export async function ask(prompt: string, model?: string): Promise<string> {
+export async function ask(prompt: string, model?: string, retries = 5, delayMs = 2000): Promise<string> {
   const { client, provider } = getClient();
   const m = model ?? getDefaultModel(provider);
 
-  const response = await client.chat.completions.create({
-    model: m,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.0,
-  }, { timeout: 10000 });
+  try {
 
-  return response.choices[0]?.message?.content ?? "";
+
+    const response = await client.chat.completions.create({
+      model: m,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.0,
+    }, { timeout: 30000 });
+
+    return response.choices[0]?.message?.content ?? "";
+  } catch (error: any) {
+    if (retries > 0 && (error?.status === 429 || error?.code === 'rate_limit_exceeded')) {
+      console.log(`\n    [LLM] Rate limit hit. Retrying in ${delayMs / 1000}s... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return ask(prompt, model, retries - 1, delayMs * 1.5);
+    }
+    throw error;
+  }
 }
 
 /** Call the LLM and parse the response as JSON */

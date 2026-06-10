@@ -1,0 +1,41 @@
+GitHub Employees for Zenskar:
+=================================
+
+Name: Shreyansh Tripathy
+Login: shreyT19
+Company: Zenskar
+Location: India
+Email: N/A
+Blog/Website: N/A
+Bio: Founding Engineer - @zenskar 
+GitHub URL: https://github.com/shreyT19
+---------------------------------
+Name: Yashu Garg
+Login: yashugarg
+Company: @zenskar
+Location: N/A
+Email: N/A
+Blog/Website: yashugarg.com
+Bio: Founding Engineer @zenskar | GSoC'22 @intel
+GitHub URL: https://github.com/yashugarg
+---------------------------------
+Name: Abhishek gahlot
+Login: abhishekgahlot2
+Company: Zenskar
+Location: Remote
+Email: N/A
+Blog/Website: N/A
+Bio: some guy at @zenskar 
+
+AI Agents, Analytics, Infra, LLM, RLHF, Data driven system lets talk: me@abhishek.it
+GitHub URL: https://github.com/abhishekgahlot2
+---------------------------------
+Name: Pushkar Mujumdar
+Login: pmZen
+Company: @zenskar 
+Location: India
+Email: N/A
+Blog/Website: N/A
+Bio: Founding Engineer at @zenskar 
+GitHub URL: https://github.com/pmZen
+---------------------------------
