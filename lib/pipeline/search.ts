@@ -139,10 +139,19 @@ function scoreResult(title: string, snippet: string, url: string, deptKeywords: 
     const safeComp = comp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const companyInSnippet = new RegExp(`(?:^|[^a-z0-9])${safeComp}(?:[^a-z0-9]|$)`).test(s);
     
-    // If the company name is exactly the person's first name, AND it doesn't appear in the snippet,
-    // this is almost certainly a false positive (e.g., Company "Tal" -> Person "Tal").
-    if (isFirstNameMatch && !companyInSnippet) {
-      score -= 50; // Heavy penalty to filter out
+    // If the company name matches any part of the person's name (e.g. first name or last name),
+    // we can't just check if the name is in the snippet (because their name will be in the snippet!).
+    // We must require strict signals.
+    const cleanNameForMatch = t.split(/[-—|]/)[0].replace(/[^a-z0-9\s]/g, '').trim();
+    const isNameMatch = cleanNameForMatch.split(/\s+/).includes(comp);
+
+    if (isNameMatch) {
+      const strictCompanyInSnippet = new RegExp(`(?:at|@|of|for)\\s+${safeComp}(?:[^a-z0-9]|$)`).test(s);
+      if (!strictCompanyInSnippet) {
+        score -= 50; // Heavy penalty to filter out false positives
+      } else {
+        score += 5; // Strong signal they actually work there
+      }
     } else if (companyInSnippet) {
       score += 5; // Good signal: company mentioned in snippet
     }
@@ -427,12 +436,13 @@ export async function searchCandidatesAuto(
     const githubResults = resultsArray[0] || [];
     const serperResults = resultsArray[1] || [];
     
+    searchResults = [...githubResults, ...serperResults];
+
     // Rescore all OSINT results using our standard rubric
-    for (const res of [...githubResults]) {
+    for (const res of searchResults) {
       res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords, company);
     }
     
-    searchResults = [...githubResults, ...serperResults];
     searchResults.sort((a, b) => b.score - a.score);
   } catch (err) {
     console.error("[search] Omni-Search engine failed:", err);
@@ -469,6 +479,10 @@ export async function searchCandidatesAuto(
       return true; // Keep
     });
   }
+
+  // Filter out false positives where the person's first name exactly matches the company name
+  // and there is no strong signal they work at the company. These are penalized heavily (-50).
+  searchResults = searchResults.filter(r => r.score > -40);
 
   // Removed findContactsLLMOnly fallback. If search yields nothing, we return empty so the user knows no real profiles were found.
   
