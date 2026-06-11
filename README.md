@@ -12,17 +12,18 @@ Applying to jobs traditionally is a numbers game with low conversion rates. This
 
 Here is the exact step-by-step flow of the pipeline, the APIs powering it, and the massive problems we solved at each step.
 
-### Step 1: Triggering the Pipeline (1-Click Apply)
-The journey begins when the user decides to apply for a role.
-- **The Flow**: The user clicks the **"🚀 Quick Apply"** button in their Job Tracker Chrome Extension while browsing any job board (LinkedIn, Naukri, Wellfound), or uses the local web form. The system instantly captures the Company Name, Target Role, and the full Job Description (JD).
+### Step 1: Triggering the Pipeline (1-Click Apply vs Manual Frontend)
+The journey begins when the user decides to apply for a role. You have two options to start the flow:
+- **Flow A (Automated): 1-Click Extension**: The user clicks the **"🚀 Quick Apply"** button in their Job Tracker Chrome Extension while browsing any job board (LinkedIn, Naukri, Wellfound). The system instantly captures the Company Name, Target Role, and the full Job Description (JD) and sends it to the backend Inngest pipeline.
+- **Flow B (Manual): Visual Web UI**: The user navigates to the frontend web app (`http://localhost:3000/outreach`), manually enters the Target Company and Target Role, and clicks "Find Contacts" to execute the pipeline step-by-step with full visual review at each stage.
 - **APIs Used**: Chrome Extension API (Manifest V3), Next.js API Routes.
 - **The Problem We Solved**: Copy-pasting JDs and manual data entry is tedious. The extension parses the DOM and dispatches the payload directly to the background pipeline in one click.
 
 ### Step 2: Unconventional Contact Discovery
 The hardest part of cold outreach is finding the *actual* hiring manager.
 - **The Flow**: The system searches for 3-5 real employees in the relevant department (e.g., Product, Engineering) at the target company.
-- **APIs Used**: Yahoo Search X-Ray (Web Scraping), GitHub API (OSINT).
-- **The Problem We Solved**: Standard LinkedIn scraping is dead—blocked by aggressive Cloudflare bot protections, CAPTCHAs, and 429 rate limits. Furthermore, traditional B2B databases (Apollo, ZoomInfo) often have outdated or missing data for small 10-50 person startups. Our engine uses unconventional OSINT strategies to safely bypass these protections and find the right people with 100% reliability.
+- **APIs Used**: Serper API (Google Search), Yahoo Search X-Ray (Web Scraping), GitHub API (OSINT).
+- **The Problem We Solved**: Standard LinkedIn scraping is dead—blocked by aggressive Cloudflare bot protections, CAPTCHAs, and 429 rate limits. Furthermore, traditional B2B databases (Apollo, ZoomInfo) often have outdated or missing data for small 10-50 person startups. Our engine uses the Serper API to programmatically Google Dork LinkedIn, paired with unconventional OSINT strategies (Yahoo X-Ray, GitHub) to safely bypass these protections and find the right people with 100% reliability.
 
 ### Step 3: Cost-Efficient Email Pattern Engine
 Once we have the names, we need verified email addresses.
@@ -59,7 +60,7 @@ To write a good email, the AI needs to know *why* you are qualified.
 - **Backend/Automation**: Inngest (Background Jobs & Pipelines)
 - **Database**: Supabase (PostgreSQL), Prisma ORM
 - **AI & ML**: Google Gemini API, Pinecone (Vector Database for RAG)
-- **Discovery OSINT**: Yahoo Search Scraping, GitHub API, Apollo.io, Hunter.io
+- **Discovery OSINT**: Serper API (Google Dorking), Yahoo Search Scraping, GitHub API, Apollo.io, Hunter.io
 - **Auth & Integration**: Google OAuth2, Gmail API (Draft creation)
 - **Chrome Extension API**: Manifest V3, content scripts, background service workers
 
