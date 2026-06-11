@@ -2,17 +2,18 @@ import { PrismaClient } from "@prisma/client";
 
 const prismaClientSingleton = () => {
   const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    throw new Error("DATABASE_URL environment variable is not set");
-  }
   
+  // If dbUrl is missing (e.g. during Vercel build step), we don't throw an error.
+  // Prisma will throw at runtime if it actually tries to connect without a URL.
   return new PrismaClient({
     log: ["query"],
-    datasources: {
-      db: {
-        url: dbUrl
+    ...(dbUrl ? {
+      datasources: {
+        db: {
+          url: dbUrl
+        }
       }
-    }
+    } : {})
   })
 }
 
