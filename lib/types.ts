@@ -66,7 +66,6 @@ export interface ValidationResult {
   reason: string;
 }
 
-/** The final email to send */
 export interface OutboundEmail {
   to_email: string;
   to_name: string;
@@ -75,4 +74,5 @@ export interface OutboundEmail {
   company: string;
   job_title: string;
   profile_url?: string;
+  senderName?: string;
 }

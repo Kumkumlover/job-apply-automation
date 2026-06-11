@@ -159,43 +159,43 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
 
   out.is_corporate = out.domain_ok && !out.is_free_provider && !out.disposable;
 
-  // 6. SPF (run in parallel with DMARC)
-  const [txts, dmarcRecords] = await Promise.all([
-    resolveTxtSafe(domain),
-    resolveTxtSafe(`_dmarc.${domain}`),
-  ]);
+  // 6. Advanced DNS (SPF, DMARC, DKIM) - ONLY if MX is OK
+  if (out.mx_ok) {
+    const prioritySelectors = ["google","selector1","selector2","default","s1","s2"];
+    
+    // Run ALL text record lookups entirely in parallel
+    const [txts, dmarcRecords, ...dkimResults] = await Promise.all([
+      resolveTxtSafe(domain),
+      resolveTxtSafe(`_dmarc.${domain}`),
+      ...prioritySelectors.map((sel) => resolveTxtSafe(`${sel}._domainkey.${domain}`))
+    ]);
 
-  for (const t of txts) {
-    if (/v=spf1/i.test(t)) {
-      out.has_spf = true;
-      const spf = parseSpf(t);
-      out.spf_strict = spf.strict;
-      break;
-    }
-  }
-
-  // 7. DMARC
-  if (dmarcRecords.length) {
-    out.has_dmarc = true;
-    for (const rec of dmarcRecords) {
-      const pm = rec.match(/p=([^;]+)/i);
-      if (pm?.[1]) {
-        out.dmarc_policy = pm[1].toLowerCase();
+    // Parse SPF
+    for (const t of txts) {
+      if (/v=spf1/i.test(t)) {
+        out.has_spf = true;
+        const spf = parseSpf(t);
+        out.spf_strict = spf.strict;
         break;
       }
     }
-  }
 
-  // 8. DKIM probe (check a few important selectors, not all 16)
-  const prioritySelectors = ["google","selector1","selector2","default","s1","s2"];
-  const dkimChecks = await Promise.all(
-    prioritySelectors.map(async (sel) => {
-      const recs = await resolveTxtSafe(`${sel}._domainkey.${domain}`);
-      return recs.length ? sel : null;
-    })
-  );
-  out.dkim_selectors_found = dkimChecks.filter(Boolean) as string[];
-  out.has_any_dkim = out.dkim_selectors_found.length > 0;
+    // Parse DMARC
+    if (dmarcRecords.length) {
+      out.has_dmarc = true;
+      for (const rec of dmarcRecords) {
+        const pm = rec.match(/p=([^;]+)/i);
+        if (pm?.[1]) {
+          out.dmarc_policy = pm[1].toLowerCase();
+          break;
+        }
+      }
+    }
+
+    // Parse DKIM
+    out.dkim_selectors_found = prioritySelectors.filter((_, idx) => dkimResults[idx].length > 0);
+    out.has_any_dkim = out.dkim_selectors_found.length > 0;
+  }
 
   // 9. Final reason
   if (!out.reason) {

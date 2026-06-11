@@ -36,8 +36,8 @@ async function scrapeUrl(url: string): Promise<string | null> {
   }
 }
 
-const GEMINI_MODEL = "gemini-2.5-flash";
-const ACTUAL_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.5-flash";
+const ACTUAL_MODEL = "gemini-3.5-flash";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",

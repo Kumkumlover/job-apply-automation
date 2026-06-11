@@ -33,25 +33,9 @@ export interface FeedbackRecord {
   timestamp: string;
 }
 
-// Memory cache for companies API limits (to avoid unnecessary DB writes for ratelimits)
-const companyApiLimits = new Map<string, number>();
-
 class IntelligenceStore {
 
-  // ── Companies (In-Memory for Rate Limits) ──
 
-  getApiCalls(domain: string): number {
-    return companyApiLimits.get(domain.toLowerCase()) || 0;
-  }
-
-  incrementApiCall(domain: string): void {
-    const key = domain.toLowerCase();
-    companyApiLimits.set(key, (companyApiLimits.get(key) || 0) + 1);
-  }
-
-  clearInMemoryLimits(): void {
-    companyApiLimits.clear();
-  }
 
   // ── Emails ──
 
@@ -217,7 +201,6 @@ class IntelligenceStore {
     }
   }
   
-  // ── Stats ──
   async getStoreStats() {
       const userId = await getDefaultUserId();
       const [patterns, emails, feedback] = await Promise.all([
@@ -230,7 +213,7 @@ class IntelligenceStore {
           patterns,
           cachedEmails: emails,
           feedbackEntries: feedback,
-          companiesTracked: companyApiLimits.size, // In-memory
+          companiesTracked: 0, // Unused
       };
   }
   

@@ -17,13 +17,23 @@ export default function EmailGeneratorPage() {
   const [geminiKey, setGeminiKey] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("geminiKey");
-    if (saved) setGeminiKey(saved);
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.apiKeys?.geminiKey) {
+          setGeminiKey(data.apiKeys.geminiKey);
+        }
+      })
+      .catch((err) => console.error("Failed to load settings:", err));
   }, []);
 
-  useEffect(() => {
-    if (geminiKey) localStorage.setItem("geminiKey", geminiKey);
-  }, [geminiKey]);
+  const handleGeminiKeyBlur = () => {
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ geminiKey })
+    }).catch(console.error);
+  };
   const [selectedProblem, setSelectedProblem] = useState<ResearchProblem | null>(null);
   const [outputType, setOutputType] = useState<OutputType>("Cold Email");
   const [step, setStep] = useState<Step>(1);
@@ -200,7 +210,7 @@ export default function EmailGeneratorPage() {
             {/* Gemini API Key */}
             <div className="mt-4 pt-4 border-t border-[#1e1e22]">
               <label className="text-[9px] font-bold uppercase text-slate-500 mb-1.5 block">Gemini API Key</label>
-              <input type="password" placeholder="AIzaSy..." value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)}
+              <input type="password" placeholder="AIzaSy..." value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)} onBlur={handleGeminiKeyBlur}
                 className="w-full bg-[#0a0a0b] p-2.5 rounded-lg border border-[#2a2a30] text-xs text-white outline-none" />
             </div>
           </div>

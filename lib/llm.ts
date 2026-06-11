@@ -31,7 +31,7 @@ function getDefaultModel(provider: Provider): string {
   switch (provider) {
     case "groq":   return "llama-3.3-70b-versatile";
     case "ollama": return process.env.OLLAMA_MODEL ?? "llama3.2";
-    case "gemini": return "gemini-2.5-flash";
+    case "gemini": return "gemini-3.5-flash";
   }
 }
 

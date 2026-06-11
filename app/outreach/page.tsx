@@ -130,8 +130,9 @@ export default function OutreachPage() {
   const [error, setError] = useState("");
 
   // API Keys
-  const [apiKeys, setApiKeys] = useState({ hunter: "", apollo: "" });
+  const [apiKeys, setApiKeys] = useState({ hunter: "", apollo: "", serper: "", gemini: "" });
   const [showKeys, setShowKeys] = useState(false);
+  const [savingKeys, setSavingKeys] = useState(false);
 
   const [isMounted, setIsMounted] = useState(false);
 
@@ -168,10 +169,20 @@ export default function OutreachPage() {
   // Load saved state on mount
   useEffect(() => {
     setIsMounted(true);
-    setApiKeys({
-      hunter: localStorage.getItem("hunterKey") || "",
-      apollo: localStorage.getItem("apolloKey") || "",
-    });
+
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.apiKeys) {
+          setApiKeys({
+            hunter: data.apiKeys.hunterKey || "",
+            apollo: data.apiKeys.apolloKey || "",
+            serper: data.apiKeys.serperKey || "",
+            gemini: data.apiKeys.geminiKey || "",
+          });
+        }
+      })
+      .catch((err) => console.error("Failed to load settings:", err));
 
     const savedCompany = localStorage.getItem("outreach_company");
     if (savedCompany) setCompany(savedCompany);
@@ -502,7 +513,7 @@ export default function OutreachPage() {
         }
       }
       
-      htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+      htmlBody += `  <p>For your reference, you can view my <a href="[Your Portfolio URL]" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at [Your Phone Number]), connect with me on <a href="[Your LinkedIn URL]" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="[Your CV URL]" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
       htmlBody += `</body>`;
       formattedHtmlBody = htmlBody;
     }
@@ -702,7 +713,7 @@ export default function OutreachPage() {
           >
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-slate-500" />
-              <span className="text-sm font-medium text-slate-400">API Keys</span>
+              <span className="text-sm font-medium text-slate-400">API Keys (Saved Securely)</span>
               {apiKeys.hunter && (
                 <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20">
                   Hunter ✓
@@ -717,37 +728,56 @@ export default function OutreachPage() {
             <span className="text-xs text-slate-500">{showKeys ? "Hide" : "Show"}</span>
           </button>
           {showKeys && (
-            <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-[#1e1e22] pt-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-500 flex items-center gap-1">
-                  <Key className="w-3 h-3 text-orange-400" /> Hunter.io API Key
-                </label>
-                <input
-                  type="password"
-                  placeholder="Enter Hunter key..."
-                  value={apiKeys.hunter}
-                  onChange={(e) => {
-                    setApiKeys((p) => ({ ...p, hunter: e.target.value }));
-                    localStorage.setItem("hunterKey", e.target.value);
-                  }}
-                  className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-sm text-white placeholder-slate-600 focus:ring-1 focus:ring-blue-500/40 outline-none"
-                />
+            <div className="px-6 pb-4 pt-4 border-t border-[#1e1e22]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-500 flex items-center gap-1">
+                    <Key className="w-3 h-3 text-orange-400" /> Hunter.io API Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter Hunter key..."
+                    value={apiKeys.hunter}
+                    onChange={(e) => setApiKeys((p) => ({ ...p, hunter: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-sm text-white placeholder-slate-600 focus:ring-1 focus:ring-blue-500/40 outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-500 flex items-center gap-1">
+                    <Key className="w-3 h-3 text-indigo-400" /> Apollo.io API Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter Apollo key..."
+                    value={apiKeys.apollo}
+                    onChange={(e) => setApiKeys((p) => ({ ...p, apollo: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-sm text-white placeholder-slate-600 focus:ring-1 focus:ring-blue-500/40 outline-none"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-500 flex items-center gap-1">
-                  <Key className="w-3 h-3 text-indigo-400" /> Apollo.io API Key
-                </label>
-                <input
-                  type="password"
-                  placeholder="Enter Apollo key..."
-                  value={apiKeys.apollo}
-                  onChange={(e) => {
-                    setApiKeys((p) => ({ ...p, apollo: e.target.value }));
-                    localStorage.setItem("apolloKey", e.target.value);
-                  }}
-                  className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a30] rounded-lg text-sm text-white placeholder-slate-600 focus:ring-1 focus:ring-blue-500/40 outline-none"
-                />
-              </div>
+              <button
+                onClick={async () => {
+                  setSavingKeys(true);
+                  try {
+                    await fetch("/api/settings", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        hunterKey: apiKeys.hunter,
+                        apolloKey: apiKeys.apollo,
+                      })
+                    });
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setSavingKeys(false);
+                  }
+                }}
+                disabled={savingKeys}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all w-full md:w-auto"
+              >
+                {savingKeys ? "Saving..." : "Save Keys"}
+              </button>
             </div>
           )}
         </div>

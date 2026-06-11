@@ -8,6 +8,10 @@ export async function GET(req: NextRequest) {
     let profile = await prisma.profileContext.findUnique({
       where: { userId },
     });
+    
+    let user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
 
     if (!profile) {
       profile = await prisma.profileContext.create({
@@ -62,7 +66,15 @@ Best,
       systemPrompt: profile.systemPrompt || defaultSystemPrompt,
     };
 
-    return NextResponse.json({ profile: populatedProfile });
+    return NextResponse.json({ 
+      profile: populatedProfile,
+      apiKeys: {
+        hunterKey: user?.hunterKey || "",
+        apolloKey: user?.apolloKey || "",
+        serperKey: user?.serperKey || "",
+        geminiKey: user?.geminiKey || ""
+      }
+    });
   } catch (err) {
     console.error("GET /api/settings error:", err);
     return NextResponse.json(
@@ -101,6 +113,20 @@ export async function POST(req: NextRequest) {
         systemPrompt: body.systemPrompt,
       },
     });
+
+    // Also update API keys if provided
+    const userUpdateData: any = {};
+    if (body.hunterKey !== undefined) userUpdateData.hunterKey = body.hunterKey;
+    if (body.apolloKey !== undefined) userUpdateData.apolloKey = body.apolloKey;
+    if (body.serperKey !== undefined) userUpdateData.serperKey = body.serperKey;
+    if (body.geminiKey !== undefined) userUpdateData.geminiKey = body.geminiKey;
+
+    if (Object.keys(userUpdateData).length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: userUpdateData
+      });
+    }
 
     return NextResponse.json({ success: true, profile: updated });
   } catch (err) {

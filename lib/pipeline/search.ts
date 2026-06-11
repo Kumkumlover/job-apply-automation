@@ -59,7 +59,8 @@ function buildQueries(
 
   // Build role variants from the job title itself
   const titleLower = jobTitle.toLowerCase();
-  const roleVariants: string[] = [];
+  const cleanJobTitle = jobTitle.replace(/"/g, '');
+  const roleVariants: string[] = [`"${cleanJobTitle}"`];
 
   if (titleLower.includes("product") || titleLower.includes(" pm") || titleLower.includes("apm")) {
     roleVariants.push("Product Manager", "Product Lead", "Head of Product", "VP Product", "Group Product Manager", "Director of Product", "Founder");
@@ -70,13 +71,12 @@ function buildQueries(
   } else if (titleLower.includes("design")) {
     roleVariants.push("Designer", "Design Lead", "UX Lead", "Head of Design");
   } else {
-    roleVariants.push(`"${jobTitle}"`, "Manager", "Lead", "Director", "Head", "Founder");
+    roleVariants.push("Manager", "Lead", "Director", "Head", "Founder");
   }
 
   // Dept query: search directly for role variants at the company.
-  // DO NOT also require titleKeywords in the query — for small companies that
-  // would double-restrict and return 0 results. Role variants alone are enough.
-  let deptQuery = `site:linkedin.com/in intitle:"${company}" (${roleVariants.map(r => `"${r}"`).join(" OR ")})`;
+  // We use intitle to ensure we only get current employees (people with the company in their headline)
+  let deptQuery = `site:linkedin.com/in intitle:"${company}" (${roleVariants.map(r => r.startsWith('"') ? r : `"${r}"`).join(" OR ")})`;
 
   // Only add JD dept hint if it adds real signal beyond the role variants
   if (jdDept && !titleKeywords.toLowerCase().includes(jdDept.toLowerCase())) {
@@ -139,50 +139,7 @@ function scoreResult(title: string, snippet: string, url: string, deptKeywords: 
   return score;
 }
 
-async function searchYahooXRay(company: string, keywords: string = ""): Promise<SearchResult[]> {
-  const query = `site:linkedin.com/in ${company} ${keywords}`.trim();
-  const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query).replace(/%20/g, '+')}`;
-  
-  console.log(`[Yahoo OSINT] Querying: ${url}`);
-  
-  try {
-      const response = await fetch(url);
-      
-      const html = await response.text();
-      console.log(`[Yahoo OSINT] Response HTML length: ${html.length}`);
-      
-      const $ = cheerio.load(html);
-      const results: SearchResult[] = [];
-      
-      $('div.algo-sr').each((i, el) => {
-          const title = $(el).find('h3 a').text() || $(el).find('h3').text();
-          let link = $(el).find('h3 a').attr('href') || $(el).find('a').attr('href');
-          
-          if (title && link && link.includes('linkedin.com/in/')) {
-              const cleanTitle = title.split(' - ')[0].split(' | ')[0].trim();
-              if (link.includes('RU=')) {
-                  const ruMatch = link.match(/RU=([^/]+)\//);
-                  if (ruMatch) {
-                      link = decodeURIComponent(ruMatch[1]);
-                  }
-              }
-              results.push({ 
-                  title: cleanTitle, 
-                  url: link.split('?')[0].replace(/\/$/, ""),
-                  snippet: title,
-                  domain: "linkedin.com",
-                  score: 5 // Baseline OSINT score
-              });
-          }
-      });
-      
-      console.log(`[Yahoo OSINT] Found ${results.length} results`);
-      return results;
-  } catch (e) {
-      console.error('[Yahoo OSINT] Error fetching or parsing data:', e);
-      return [];
-  }
-}
+
 
 async function searchGitHubOSINT(company: string, keywords: string = ""): Promise<SearchResult[]> {
   try {
@@ -243,18 +200,24 @@ export async function searchCandidates(
     throw new Error("SERPER_API_KEY is not configured.");
   }
 
-  async function runQuery(q: string) {
+  async function runQuery(q: string, page: number = 1) {
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "X-API-KEY": serperKey!, "Content-Type": "application/json" },
-      body: JSON.stringify({ q, num: 10 })
+      body: JSON.stringify({ q, num: 10, page })
     });
     if (!res.ok) return [];
     const data = await res.json();
     return data.organic || [];
   }
 
-  const [deptItems, hrItems] = await Promise.all([runQuery(deptQuery), runQuery(hrQuery)]);
+  const [deptItemsPage1, deptItemsPage2, hrItems] = await Promise.all([
+    runQuery(deptQuery, 1),
+    runQuery(deptQuery, 2),
+    runQuery(hrQuery, 1)
+  ]);
+  
+  const deptItems = [...deptItemsPage1, ...deptItemsPage2];
 
   console.log(`[search] dept results: ${deptItems.length}, hr results: ${hrItems.length}`);
 
@@ -296,7 +259,7 @@ export async function searchCandidates(
   }
 
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, 10);
+  return results.slice(0, 20);
 }
 
 
@@ -429,7 +392,6 @@ export async function searchCandidatesAuto(
 
   try {
     const searchPromises: Promise<SearchResult[]>[] = [
-      searchYahooXRay(company, osintKeyword),
       searchGitHubOSINT(company, osintKeyword)
     ];
 
@@ -444,16 +406,15 @@ export async function searchCandidatesAuto(
     }
 
     const resultsArray = await Promise.all(searchPromises);
-    const yahooResults = resultsArray[0] || [];
-    const githubResults = resultsArray[1] || [];
-    const serperResults = resultsArray[2] || [];
+    const githubResults = resultsArray[0] || [];
+    const serperResults = resultsArray[1] || [];
     
     // Rescore all OSINT results using our standard rubric
-    for (const res of [...yahooResults, ...githubResults]) {
+    for (const res of [...githubResults]) {
       res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords);
     }
     
-    searchResults = [...yahooResults, ...githubResults, ...serperResults];
+    searchResults = [...githubResults, ...serperResults];
     searchResults.sort((a, b) => b.score - a.score);
   } catch (err) {
     console.error("[search] Omni-Search engine failed:", err);

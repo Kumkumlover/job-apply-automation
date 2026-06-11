@@ -1,7 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 
 const prismaClientSingleton = () => {
-  const dbUrl = process.env.DATABASE_URL || "postgresql://postgres.tgdmneglszmilwwkwzdt:Shigupta%40123@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true";
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    throw new Error("DATABASE_URL environment variable is not set");
+  }
   
   return new PrismaClient({
     log: ["query"],
@@ -39,6 +42,26 @@ export async function getDefaultUserId(): Promise<string> {
         email,
         name: "Shikhar Gupta",
       },
+    });
+  }
+
+  // Auto-seed ProfileContext if it doesn't exist so user doesn't have to re-enter data
+  const profile = await prisma.profileContext.findUnique({
+    where: { userId: user.id },
+  });
+
+  if (!profile) {
+    await prisma.profileContext.create({
+      data: {
+        userId: user.id,
+        resume: "https://shikhargupta.com/resume.pdf",
+        portfolioUrl: "https://shikhargupta.com",
+        phone: "+91 9540443422",
+        senderName: "Shikhar Gupta",
+        linkedinUrl: "https://www.linkedin.com/in/shikhargupta",
+        skills: "Full-stack development, Next.js, Node.js, AI Integration, Growth Engineering",
+        background: "Software engineer and founder focused on building agentic workflows and AI-powered tools.",
+      }
     });
   }
 

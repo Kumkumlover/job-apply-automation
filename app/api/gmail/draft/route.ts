@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
-import { prisma } from "@/lib/prisma";
+import { prisma, getDefaultUserId } from "@/lib/db";
+import { Buffer } from "node:buffer";
 
 export async function POST(request: Request) {
   try {
@@ -10,8 +11,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // Get the first user and their linked Gmail account
-    const user = await prisma.user.findFirst({
+    // Get the active user
+    const userId = await getDefaultUserId();
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
       include: { linkedGmailAccounts: true }
     });
 
@@ -28,6 +31,21 @@ export async function POST(request: Request) {
     }
 
     const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+
+    oauth2Client.on('tokens', async (tokens) => {
+      // Save newly refreshed tokens back to database
+      if (tokens.access_token) {
+        await prisma.linkedGmailAccount.update({
+          where: { id: linkedAccount.id },
+          data: {
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token || linkedAccount.refreshToken,
+            expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null
+          }
+        });
+      }
+    });
+
     oauth2Client.setCredentials({
       access_token: linkedAccount.accessToken,
       refresh_token: linkedAccount.refreshToken,
@@ -72,8 +90,8 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true, draftId: res.data.id });
-  } catch (error: any) {
-    console.error("Failed to create draft via Gmail API:", error);
-    return NextResponse.json({ error: "Failed to create draft" }, { status: 500 });
-  }
+    } catch (error: any) {
+      console.error("Failed to create draft via Gmail API:", error);
+      return NextResponse.json({ error: "Failed to create draft: " + (error.message || error) }, { status: 500 });
+    }
 }

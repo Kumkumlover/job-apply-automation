@@ -418,7 +418,8 @@ async function processPerson(
   hunterKey: string,
   apolloKey: string,
   preFetchedResults?: Map<string, any>,
-  localApiUsage: { hunter: number; apollo: number } = { hunter: 0, apollo: 0 }
+  localApiUsage: { hunter: number; apollo: number } = { hunter: 0, apollo: 0 },
+  localApiTrack?: Map<string, number>
 ): Promise<PersonResult> {
   const { first, last } = parseName(person.name);
   let domain = extractDomain(person.domain ?? "");
@@ -496,8 +497,20 @@ async function processPerson(
     }
   }
 
+  // Reserve API quota synchronously to prevent race conditions in Promise.all
+  let canCallApi = false;
+  if (localApiTrack) {
+    const current = localApiTrack.get(domain) || 0;
+    if (apiCalls + current < 2) {
+      canCallApi = true;
+      localApiTrack.set(domain, current + 1);
+    }
+  } else {
+    canCallApi = apiCalls < 2;
+  }
+
   // 2. API Lookups (max 2 per domain)
-  if (domain && hunterKey && apiCalls < 2) {
+  if (domain && hunterKey && canCallApi) {
     // Check prefetched
     const prefetched = preFetchedResults?.get(`${resolvedPerson.name}-${domain}`);
     if (prefetched) {
@@ -524,7 +537,7 @@ async function processPerson(
     }
   }
 
-  if (apiCalls < 2) {
+  if (canCallApi && apolloKey) {
     // Try Apollo
     localApiUsage.apollo++;
     const apolloResult = await apolloLookup(resolvedPerson.name, resolvedPerson.company, domain, apolloKey);
@@ -757,23 +770,25 @@ export async function enrichAll(
   }
 
   // 3. Process each person
-  // We process SEQUENTIALLY on purpose. The database cache enforces a max limit 
-  // of 2 API calls per domain. If we process in parallel, they all query the DB
-  // simultaneously, read '0 API calls', and all hit Hunter at the same time.
-  for (const person of people) {
+  // We process CONCURRENTLY to avoid Vercel 60s timeouts. 
+  // `localApiTrack` is used to enforce the 2 API calls/domain limit across concurrent promises.
+  const localApiTrack = new Map<string, number>();
+
+  const processPromises = people.map(async (person) => {
     if (person.email) {
-      results.push({
+      return {
         name: person.name,
         company: person.company,
         domain: person.domain || "",
         emails: [{ email: person.email, source: "JD Extraction", confidence: 100, type: "verified" } as EmailResult],
         recommended: person.email,
-      });
-      continue;
+      };
     }
-    const p = await processPerson(person, hunterKey, apolloKey, preFetchedResults, localApiUsage);
-    results.push(p);
-  }
+    return await processPerson(person, hunterKey, apolloKey, preFetchedResults, localApiUsage, localApiTrack);
+  });
+
+  results.push(...(await Promise.all(processPromises)));
+
   return { results, localApiUsage };
 }
 

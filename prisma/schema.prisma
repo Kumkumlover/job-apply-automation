@@ -42,11 +42,16 @@ model User {
   emailVerified       DateTime?
   image               String?
   apiKey              String?              @unique @default(cuid())
+  apolloKey           String?
+  geminiKey           String?
+  hunterKey           String?
+  serperKey           String?
   accounts            Account[]
   applications        Application[]
   cachedEmails        CachedEmail[]
   customProperties    CustomProperty[]
   customStages        CustomStage[]
+  DomainApiLimit      DomainApiLimit[]
   emailGuessHistories EmailGuessHistory[]
   feedbackEntries     FeedbackEntry[]
   gmailSyncState      GmailSyncState?
@@ -273,4 +278,15 @@ model FeedbackEntry {
   status    String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DomainApiLimit {
+  id        String   @id
+  userId    String
+  domain    String
+  count     Int      @default(0)
+  updatedAt DateTime
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, domain])
 }

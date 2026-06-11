@@ -1,26 +1,45 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { google } from "googleapis";
-import { prisma } from "@/lib/prisma"; // Assuming this exists based on common Next.js + Prisma setups
+import { prisma, getDefaultUserId } from "@/lib/db";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
+  const errorParam = url.searchParams.get("error");
+
+  if (errorParam === "access_denied") {
+    // If the user cancels the Google auth flow
+    return NextResponse.redirect(new URL("/settings?error=access_denied", process.env.NEXT_PUBLIC_APP_URL || url.origin));
+  }
 
   if (!code) {
     return NextResponse.json({ error: "Missing authorization code" }, { status: 400 });
   }
 
   let redirectPath = "/settings";
-  let origin = url.origin;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  let origin = appUrl;
+  let stateCsrfToken = "";
+
   if (state) {
     try {
-      const decodedState = JSON.parse(Buffer.from(state, "base64").toString("utf-8"));
+      const decodedState = JSON.parse(atob(state));
       if (decodedState.redirectPath) redirectPath = decodedState.redirectPath;
       if (decodedState.origin) origin = decodedState.origin;
+      if (decodedState.csrfToken) stateCsrfToken = decodedState.csrfToken;
     } catch (e) {
       console.error("Failed to parse state", e);
     }
+  }
+
+  // Validate CSRF token
+  const cookieStore = await cookies();
+  const storedCsrfToken = cookieStore.get("oauth_csrf_token")?.value;
+
+  if (!stateCsrfToken || !storedCsrfToken || stateCsrfToken !== storedCsrfToken) {
+    return NextResponse.json({ error: "Invalid CSRF token. Request rejected." }, { status: 403 });
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -46,20 +65,14 @@ export async function GET(request: Request) {
       throw new Error("Could not retrieve email from Google");
     }
 
-    // For a single-user app (or if we have a default user), we just get the first user
-    // Since there's no auth session implemented yet, let's just tie it to the first user or create one
-    let user = await prisma.user.findFirst();
-    if (!user) {
-      user = await prisma.user.create({
-        data: { email: email, name: userInfo.data.name || "Default User" }
-      });
-    }
+    // For a single-user app (or if we have a default user), get the actual default user
+    const userId = await getDefaultUserId();
 
     // Save tokens to LinkedGmailAccount
     await prisma.linkedGmailAccount.upsert({
       where: {
         userId_email: {
-          userId: user.id,
+          userId: userId,
           email: email
         }
       },
@@ -69,7 +82,7 @@ export async function GET(request: Request) {
         expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null
       },
       create: {
-        userId: user.id,
+        userId: userId,
         email: email,
         accessToken: tokens.access_token || "",
         refreshToken: tokens.refresh_token,

@@ -54,12 +54,19 @@ export default function EmailFinderPage() {
 
   // Load saved keys on mount
   useEffect(() => {
-    const savedHunter = localStorage.getItem("hunterKey") || "";
-    const savedApollo = localStorage.getItem("apolloKey") || "";
-    setApiKeys({ hunter: savedHunter, apollo: savedApollo });
-    setTempKeys({ hunter: savedHunter, apollo: savedApollo });
-    if (savedHunter) setKeyStatus((prev) => ({ ...prev, hunter: "valid" }));
-    if (savedApollo) setKeyStatus((prev) => ({ ...prev, apollo: "valid" }));
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.apiKeys) {
+          const savedHunter = data.apiKeys.hunterKey || "";
+          const savedApollo = data.apiKeys.apolloKey || "";
+          setApiKeys({ hunter: savedHunter, apollo: savedApollo });
+          setTempKeys({ hunter: savedHunter, apollo: savedApollo });
+          if (savedHunter) setKeyStatus((prev) => ({ ...prev, hunter: "valid" }));
+          if (savedApollo) setKeyStatus((prev) => ({ ...prev, apollo: "valid" }));
+        }
+      })
+      .catch((err) => console.error("Failed to load settings:", err));
   }, []);
 
   const handleTempKeyChange = (provider: "hunter" | "apollo", val: string) => {
@@ -72,7 +79,11 @@ export default function EmailFinderPage() {
     const key = tempKeys[provider].trim();
     if (!key) {
       setApiKeys((prev) => ({ ...prev, [provider]: "" }));
-      localStorage.removeItem(`${provider}Key`);
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [`${provider}Key`]: "" })
+      }).catch(console.error);
       setKeyStatus((prev) => ({ ...prev, [provider]: "idle" }));
       return;
     }
@@ -92,7 +103,13 @@ export default function EmailFinderPage() {
       if (providerData && providerData.valid) {
         setKeyStatus((prev) => ({ ...prev, [provider]: "valid" }));
         setApiKeys((prev) => ({ ...prev, [provider]: key }));
-        localStorage.setItem(`${provider}Key`, key);
+        
+        // Save to DB
+        await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [`${provider}Key`]: key })
+        });
       } else {
         setKeyStatus((prev) => ({ ...prev, [provider]: "invalid" }));
         setKeyError((prev) => ({ ...prev, [provider]: "Invalid API key" }));
@@ -174,6 +191,9 @@ export default function EmailFinderPage() {
       });
 
       if (!res.ok) {
+        if (res.status === 504) {
+          throw new Error("The request timed out (504). Please try processing fewer contacts at once, or wait a moment and try again.");
+        }
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error ?? `Server error: ${res.status}`);
       }
