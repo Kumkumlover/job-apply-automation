@@ -103,11 +103,12 @@ function buildQueries(
  * Heuristic score for a LinkedIn search result.
  * Dept-specific titles score higher; pure generic HR penalised.
  */
-function scoreResult(title: string, snippet: string, url: string, deptKeywords: string = ""): number {
+function scoreResult(title: string, snippet: string, url: string, deptKeywords: string = "", company: string = ""): number {
   let score = 0;
   const t = title.toLowerCase();
   const s = snippet.toLowerCase();
   const dept = deptKeywords.toLowerCase();
+  const comp = company.toLowerCase().trim();
 
   // URL quality
   if (url.includes("linkedin.com/in/")) score += 3;
@@ -120,18 +121,35 @@ function scoreResult(title: string, snippet: string, url: string, deptKeywords: 
     if (s.includes(k)) score += 0.5;
   }
 
-  // Department relevance bonus — if the dept keywords appear in the title, strong signal
+  // Department relevance bonus
   if (dept) {
     const deptWords = dept.split(" ").filter(w => w.length > 2);
     for (const dw of deptWords) {
-      if (t.includes(dw)) score += 6; // Strong boost for exact department match in title
+      if (t.includes(dw)) score += 6;
       if (s.includes(dw)) score += 1;
     }
   }
 
-  // Penalise pure generic HR (not department HR)
+  // Company Match Logic (Crucial for edge cases where company name == first name)
+  if (comp) {
+    const titleWords = t.split(/\s+/);
+    const isFirstNameMatch = titleWords.length > 0 && titleWords[0] === comp;
+    
+    // Escape regex characters and enforce boundaries to avoid matching "tal" inside "digital"
+    const safeComp = comp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const companyInSnippet = new RegExp(`(?:^|[^a-z0-9])${safeComp}(?:[^a-z0-9]|$)`).test(s);
+    
+    // If the company name is exactly the person's first name, AND it doesn't appear in the snippet,
+    // this is almost certainly a false positive (e.g., Company "Tal" -> Person "Tal").
+    if (isFirstNameMatch && !companyInSnippet) {
+      score -= 50; // Heavy penalty to filter out
+    } else if (companyInSnippet) {
+      score += 5; // Good signal: company mentioned in snippet
+    }
+  }
+
+  // Penalise pure generic HR
   const isFounderScore = /\b(founder|co-founder|ceo|chief executive)\b/.test(t);
-  // Tightened: 'people' alone no longer triggers HR — requires specific HR role keywords
   const isHRScore = /\b(human resources|talent acquisition|recruiter|hrbp|hr business partner|people partner|people ops|people operations)\b/.test(t + " " + s);
   const hasDeptSignal = dept && dept.split(" ").some(w => w.length > 2 && t.includes(w));
   if (isHRScore && !hasDeptSignal && !isFounderScore) score -= 5;
@@ -237,7 +255,7 @@ export async function searchCandidates(
       title: cleanTitle,
       snippet: item.snippet || "",
       domain: "linkedin.com",
-      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords) + 5 // Dept priority boost
+      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords, company) + 5 // Dept priority boost
     });
   }
 
@@ -254,7 +272,7 @@ export async function searchCandidates(
       title: cleanTitle,
       snippet: item.snippet || "",
       domain: "linkedin.com",
-      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords) // No priority boost for HR
+      score: scoreResult(cleanTitle, item.snippet || "", link, deptKeywords, company) // No priority boost for HR
     });
   }
 
@@ -411,7 +429,7 @@ export async function searchCandidatesAuto(
     
     // Rescore all OSINT results using our standard rubric
     for (const res of [...githubResults]) {
-      res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords);
+      res.score += scoreResult(res.title, res.snippet, res.url, deptKeywords, company);
     }
     
     searchResults = [...githubResults, ...serperResults];
