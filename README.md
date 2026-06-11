@@ -1,4 +1,4 @@
-# Job Apply Automation System 🚀
+# Cold Outreach Apply Automation System 
 
 An autonomous, AI-powered system designed to completely automate the grueling process of finding hiring managers and generating hyper-personalized cold outreach emails. Built to seamlessly integrate with your existing Job Tracker CRM, this suite gives you an unfair advantage in the job market.
 
@@ -72,6 +72,7 @@ To write a good email, the AI needs to know *why* you are qualified.
 - Apollo / Hunter API Keys
 - Google Cloud Console Project (with Gmail API enabled)
 - Inngest Account
+- Serper account
 
 ### Installation
 ```bash
