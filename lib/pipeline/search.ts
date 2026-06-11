@@ -75,8 +75,8 @@ function buildQueries(
   }
 
   // Dept query: search directly for role variants at the company.
-  // We use intitle to ensure we only get current employees (people with the company in their headline)
-  let deptQuery = `site:linkedin.com/in intitle:"${company}" (${roleVariants.map(r => r.startsWith('"') ? r : `"${r}"`).join(" OR ")})`;
+  // We use the company name directly to avoid edge cases where the company name matches a first name (e.g., "Tal").
+  let deptQuery = `site:linkedin.com/in "${company}" (${roleVariants.map(r => r.startsWith('"') ? r : `"${r}"`).join(" OR ")})`;
 
   // Only add JD dept hint if it adds real signal beyond the role variants
   if (jdDept && !titleKeywords.toLowerCase().includes(jdDept.toLowerCase())) {
@@ -85,7 +85,7 @@ function buildQueries(
 
   // HR query: look for recruiters/HR at the company
   const hrDeptHint = jdDept || titleKeywords || jobTitle;
-  let hrQuery = `site:linkedin.com/in intitle:"${company}" (Recruiter OR "Talent Acquisition" OR "HR Business Partner" OR "People Partner") "${hrDeptHint}"`;
+  let hrQuery = `site:linkedin.com/in "${company}" (Recruiter OR "Talent Acquisition" OR "HR Business Partner" OR "People Partner") "${hrDeptHint}"`;
 
   const exclusions = excludeNames.length > 0
     ? excludeNames.map(n => `-"${n}"`).join(" ")
