@@ -16,15 +16,15 @@ export function generateCopy(
   profile?: any // Using any to avoid importing Prisma types here which might cause circular issues or just keep it simple
 ): string {
   const name = contactName || "Hiring Manager";
-  const senderName = profile?.senderName || "[Your Name]";
-  const portfolio = profile?.portfolioUrl || "[Your Portfolio URL]";
-  const phone = profile?.phone || "[Your Phone Number]";
-  const linkedin = profile?.linkedinUrl || "[Your LinkedIn URL]";
-  const cv = profile?.resumeUrl || "[Your CV URL]";
+  const senderName = profile?.senderName || "Shikhar Gupta";
+  const portfolio = profile?.portfolioUrl || "https://shikharpmg.onhercules.app/";
+  const phone = profile?.phone || "+91 7987177269";
+  const linkedin = profile?.linkedinUrl || "https://www.linkedin.com/in/shikhar-gupta-505b0b21b/";
+  const cv = profile?.resumeUrl || "https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf";
   
-  const defaultBullets = `• Highlight 1: Replaced internal tools saving 150k.
-• Highlight 2: Built an onboarding agent reducing costs by 60%.
-• Highlight 3: Experienced in full-stack development and automation.`;
+  const defaultBullets = `• I am Shikhar Gupta, an AI Product Intern at SuperAGI (AI CRM), currently owning end-to-end discovery and execution for Analytics, Chat, and Project Management modules, built them from 0–1 and replaced tools like Slack and Jira for internal usage saving more than 150k in cost.
+• I have led the development of multiple AI-agents including an AI onboarding agent that reduced customer success costs by 60% and a chat-native PM agent that automated task tracking and reduced project management overhead by 40% in SuperAGI.
+• I am a Top PM fellow at Nextleap (Top 10%), Ex Product Analyst @Digital Harbor and have built automations such as Job email outreach using N8N and Job tracker as a browser extension.`;
   const bullets = profile?.aboutMeBullets || defaultBullets;
 
   // Custom Template Logic

@@ -513,7 +513,7 @@ export default function OutreachPage() {
         }
       }
       
-      htmlBody += `  <p>For your reference, you can view my <a href="[Your Portfolio URL]" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at [Your Phone Number]), connect with me on <a href="[Your LinkedIn URL]" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="[Your CV URL]" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+      htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
       htmlBody += `</body>`;
       formattedHtmlBody = htmlBody;
     }
