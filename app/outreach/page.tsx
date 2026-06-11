@@ -135,6 +135,7 @@ export default function OutreachPage() {
   const [savingKeys, setSavingKeys] = useState(false);
 
   const [isMounted, setIsMounted] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
 
   // Step 1: Input
   const [company, setCompany] = useState("");
@@ -180,6 +181,9 @@ export default function OutreachPage() {
             serper: data.apiKeys.serperKey || "",
             gemini: data.apiKeys.geminiKey || "",
           });
+        }
+        if (data.profile) {
+          setUserProfile(data.profile);
         }
       })
       .catch((err) => console.error("Failed to load settings:", err));
@@ -513,7 +517,12 @@ export default function OutreachPage() {
         }
       }
       
-      htmlBody += `  <p>For your reference, you can view my <a href="https://shikharpmg.onhercules.app/" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at +91 7987177269), connect with me on <a href="https://www.linkedin.com/in/shikhar-gupta-505b0b21b/" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
+      const portfolio = userProfile?.portfolioUrl || "[Your Portfolio URL]";
+      const phone = userProfile?.phone || "[Your Phone Number]";
+      const linkedin = userProfile?.linkedinUrl || "[Your LinkedIn URL]";
+      const cv = userProfile?.resume || "[Your CV URL]";
+      
+      htmlBody += `  <p>For your reference, you can view my <a href="${portfolio}" style="color:#0366d6; text-decoration:underline;">Portfolio</a> (reachable at ${phone}), connect with me on <a href="${linkedin}" style="color:#0366d6; text-decoration:underline;">LinkedIn</a>, or review my <a href="${cv}" style="color:#0366d6; text-decoration:underline;">CV</a>.</p>\n`;
       htmlBody += `</body>`;
       formattedHtmlBody = htmlBody;
     }

@@ -31,11 +31,11 @@ export function composeEmail(
   profile?: any
 ): string {
   const greeting = recipientName ? `Hi ${recipientName}` : "Hi there";
-  const portfolio = profile?.portfolioUrl || "https://shikharpmg.onhercules.app/";
-  const phone = profile?.phone || "+91 7987177269";
-  const linkedin = profile?.linkedinUrl || "https://www.linkedin.com/in/shikhar-gupta-505b0b21b/";
-  const cv = profile?.resumeUrl || "https://assets.nextleap.app/user-resume/ShikharCV-a4a6863b-b8f8-4699-9370-db5da8104ad9.pdf";
-  const senderName = profile?.senderName || "Shikhar Gupta";
+  const portfolio = profile?.portfolioUrl || "[Your Portfolio URL]";
+  const phone = profile?.phone || "[Your Phone Number]";
+  const linkedin = profile?.linkedinUrl || "[Your LinkedIn URL]";
+  const cv = profile?.resume || "[Your CV URL]";
+  const senderName = profile?.senderName || "[Your Name]";
 
   return `<body style="font-family: Arial, Helvetica, sans-serif; color: #000; line-height: 1.5; font-size: 14px;">
   <p>${greeting},</p>
@@ -60,7 +60,7 @@ export async function sendOutboundEmail(
 
   try {
     const mailOptions = {
-      from: `"${email.senderName || 'Shikhar Gupta'}" <${process.env.SMTP_USER}>`,
+      from: `"${email.senderName || '[Your Name]'}" <${process.env.SMTP_USER}>`,
       to: email.to_email,
       subject: email.subject,
       html: email.html_body,

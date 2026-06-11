@@ -6,6 +6,7 @@ import { discoverEmails } from "./pipeline/discover-emails";
 import { findFirstValidEmail, validateEmail } from "./pipeline/validate";
 import { personalizeReason } from "./pipeline/personalize";
 import { composeEmail, sendOutboundEmail } from "./pipeline/send";
+import { prisma, getDefaultUserId } from "./db";
 
 export const inngest = new Inngest({
   id: "job-apply-automation",
@@ -57,11 +58,16 @@ export const applyPipeline = inngest.createFunction(
       });
 
       const result = await step.run("send-email", async () => {
+        const userId = await getDefaultUserId();
+        const profile = await prisma.profileContext.findUnique({ where: { userId } });
+        
         const html = composeEmail(
           payload.recipient_name ?? "",
           reason,
           payload.company,
-          payload.job_title
+          payload.job_title,
+          undefined,
+          profile || undefined
         );
         return await sendOutboundEmail({
           to_email: email,
@@ -131,12 +137,16 @@ export const applyPipeline = inngest.createFunction(
     });
 
     const result = await step.run("send-email", async () => {
+      const userId = await getDefaultUserId();
+      const profile = await prisma.profileContext.findUnique({ where: { userId } });
+      
       const html = composeEmail(
         validResult.candidate.candidate_name,
         reason,
         payload.company,
         payload.job_title,
-        validResult.candidate.profile_url ?? undefined
+        validResult.candidate.profile_url ?? undefined,
+        profile || undefined
       );
       return await sendOutboundEmail({
         to_email: validResult.candidate.email,
