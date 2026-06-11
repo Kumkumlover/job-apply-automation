@@ -1,8 +1,8 @@
-# Job Apply Automation System 🚀
+# Job Apply Automation System 
 
 An autonomous, AI-powered system designed to automate the process of finding hiring managers and generating hyper-personalized cold outreach emails. Built to seamlessly integrate with your existing Job Tracker CRM and Chrome Extension.
 
-## 🌟 Key Features
+##  Key Features
 
 ### 1. Inngest-Powered Automation Pipeline
 - A robust, background-job pipeline powered by Inngest. It orchestrates the entire job application process asynchronously: discovering contacts, extracting emails, checking vaults, and writing tailored drafts.
@@ -10,7 +10,7 @@ An autonomous, AI-powered system designed to automate the process of finding hir
 
 ### 2. Unconventional Contact Discovery Engine
 - Uses advanced open-source intelligence (OSINT) gathering to find employees at startups.
-- **Yahoo Search LinkedIn X-Ray**: Safely performs deep searches for specific departments (e.g. "Product") at target companies to bypass LinkedIn bot protections.
+- **Yahoo Search, Serper LinkedIn X-Ray**: Safely performs deep searches for specific departments (e.g. "Product") at target companies to bypass LinkedIn bot protections.
 - **GitHub API OSINT**: Searches GitHub for developers associated with the startup domain.
 - Seamlessly deduplicates and outputs reliable contact data for the outreach system.
 
@@ -47,9 +47,15 @@ An autonomous, AI-powered system designed to automate the process of finding hir
 ## 📈 Outcomes
 - **Speed**: Reduces the time to research a company, find the hiring manager, and write a personalized email from ~20 minutes to under **1 minute**.
 - **Reliability**: With Inngest replacing synchronous edge functions, Vercel timeouts are completely eliminated.
-- **Accuracy**: Bypasses traditional Cloudflare bot protections to discover contacts effectively, even at small 10-person startups.
+- **Accuracy**: Bypasses traditional Cloudflare bot protections to discover contacts effectively, even at small 10-person
+  startups.
+## API integrations:
+1. Groq LLM
+2. Gemini LLM
+3. Serper (Search)
+4. Hunter/Apollo (Email enrichment)
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Node.js (v18+)
@@ -58,7 +64,7 @@ An autonomous, AI-powered system designed to automate the process of finding hir
 - Apollo / Hunter API Keys
 - Google Cloud Console Project (with Gmail API enabled)
 - Inngest Account
-
+- Serper account
 ### Installation
 ```bash
 # Clone the repository
