@@ -27,4 +27,7 @@ Do not execute modifying tool calls (editing files, running bash commands) until
 - Run git logs if necessary to understand historical context.
 - Ask the user clarifying questions if the requirement is ambiguous.
 
+## 5. Mandatory Code Reviews
+Any code changes you make MUST be reviewed by the Code Reviewer subagent before being pushed to production or the remote repository, even if the user does not explicitly ask you to do so.
+
 **By reading this file, you agree to these terms. Proceed with caution, deliberation, and thoroughness.**
