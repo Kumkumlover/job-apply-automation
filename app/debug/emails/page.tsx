@@ -2,6 +2,8 @@ import { prisma, getDefaultUserId } from "@/lib/db";
 import { Database, Search, Trash2 } from "lucide-react";
 import { revalidatePath } from "next/cache";
 
+export const dynamic = "force-dynamic";
+
 export default async function DebuggerPage() {
   const userId = await getDefaultUserId();
 
