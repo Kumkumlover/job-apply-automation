@@ -2,21 +2,24 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Global API Tracker Sync', () => {
   test('should display global limits correctly with valid keys', async ({ page }) => {
-    await page.goto('/outreach');
-    
-    // Inject real keys into local storage
-    await page.evaluate(() => {
-      localStorage.setItem('hunterKey', 'c9dff947f42d6e4cc5ffa72f84cc4a545a07e708');
-      localStorage.setItem('apolloKey', 'Ww3fYh7-q7Xl4q1LAt3GUw');
+    // Mock the settings API to provide valid keys
+    await page.route('/api/settings', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          apiKeys: {
+            hunterKey: 'c9dff947f42d6e4cc5ffa72f84cc4a545a07e708',
+            apolloKey: 'Ww3fYh7-q7Xl4q1LAt3GUw',
+            serperKey: '',
+            geminiKey: ''
+          }
+        })
+      });
     });
 
-    // Reload so component picks up the keys on mount
-    await page.reload();
+    await page.goto('/outreach');
 
-    // The tracker should be hidden if no local usage, so let's trigger it by clicking next step or something
-    // Actually, since we modified it, the tracker now renders if hunterKey or apolloKey is present!
-    // Let's verify it renders.
-    
     // Click the "API Tracker" toggle button
     const toggleBtn = page.getByRole('button', { name: 'API Tracker' });
     await expect(toggleBtn).toBeVisible({ timeout: 10000 });

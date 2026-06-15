@@ -67,64 +67,64 @@ export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerP
       
       {/* Expanded Widget */}
       {isOpen && (
-        <div className="w-80 bg-[#0a0a0b]/80 backdrop-blur-xl border border-[#2a2a30] rounded-2xl p-5 shadow-2xl shadow-indigo-500/5 animate-in slide-in-from-bottom-5 fade-in duration-300">
+        <div className="w-80 bg-[var(--background)]/80 backdrop-blur-xl border border-[var(--border)] rounded-2xl p-5 animate-in slide-in-from-bottom-5 fade-in duration-300">
           
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Activity className="w-4 h-4 text-indigo-400" /> API Usage Sync
+            <h3 className="text-sm font-bold text-[var(--foreground)] flex items-center gap-2">
+              <Activity className="w-4 h-4 text-[var(--primary)]" /> API Usage Sync
             </h3>
             <button 
               onClick={fetchGlobalUsage}
               disabled={isRefreshing}
-              className="p-1.5 hover:bg-[#1e1e22] rounded-md transition-colors"
+              className="p-1.5 hover:bg-[var(--secondary)] rounded-md transition-colors"
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${isRefreshing ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 text-[var(--muted-foreground)] ${isRefreshing ? "animate-spin" : ""}`} />
             </button>
           </div>
 
           <div className="space-y-4">
             {/* Local Usage (Current Session) */}
-            <div className="bg-[#111113]/50 rounded-xl p-3 border border-[#1e1e22]">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Current Run Limits</div>
+            <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)]">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Current Run Limits</div>
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-[#161619] rounded-lg p-2 border border-[#1e1e22]">
-                  <div className="text-lg font-bold text-emerald-400">{localUsage.search}</div>
-                  <div className="text-[10px] text-slate-400">Searches</div>
+                <div className="bg-[var(--card-hover)] rounded-lg p-2 border border-[var(--border)]">
+                  <div className="text-lg font-bold text-[var(--primary)]">{localUsage.search}</div>
+                  <div className="text-[10px] text-[var(--muted-foreground)]">Searches</div>
                 </div>
-                <div className="bg-[#161619] rounded-lg p-2 border border-[#1e1e22]">
-                  <div className="text-lg font-bold text-purple-400">{localUsage.apollo}</div>
-                  <div className="text-[10px] text-slate-400">Apollo</div>
+                <div className="bg-[var(--card-hover)] rounded-lg p-2 border border-[var(--border)]">
+                  <div className="text-lg font-bold text-[var(--primary)]">{localUsage.apollo}</div>
+                  <div className="text-[10px] text-[var(--muted-foreground)]">Apollo</div>
                 </div>
-                <div className="bg-[#161619] rounded-lg p-2 border border-[#1e1e22]">
-                  <div className="text-lg font-bold text-orange-400">{localUsage.hunter}</div>
-                  <div className="text-[10px] text-slate-400">Hunter</div>
+                <div className="bg-[var(--card-hover)] rounded-lg p-2 border border-[var(--border)]">
+                  <div className="text-lg font-bold text-[var(--primary)]">{localUsage.hunter}</div>
+                  <div className="text-[10px] text-[var(--muted-foreground)]">Hunter</div>
                 </div>
               </div>
             </div>
 
             {/* Global Usage */}
-            <div className="bg-[#111113]/50 rounded-xl p-3 border border-[#1e1e22]">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Global Account Limits</div>
+            <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)]">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Global Account Limits</div>
               
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400 flex items-center gap-1.5"><Database className="w-3 h-3 text-orange-400"/> Hunter</span>
+                  <span className="text-[var(--muted-foreground)] flex items-center gap-1.5"><Database className="w-3 h-3 text-[var(--primary)]"/> Hunter</span>
                   {!hunterKey ? (
-                    <span className="text-orange-500/70 text-[10px] uppercase font-bold">Key Required</span>
+                    <span className="text-[var(--primary)]/70 text-[10px] uppercase font-bold">Key Required</span>
                   ) : globalUsage?.hunter ? (
-                    <span className="font-medium text-slate-200">{globalUsage.hunter.requestsUsed} / {globalUsage.hunter.requestsAvailable}</span>
+                    <span className="font-medium text-[var(--foreground)]">{globalUsage.hunter.requestsUsed} / {globalUsage.hunter.requestsAvailable}</span>
                   ) : (
-                    <span className="text-slate-600">Loading...</span>
+                    <span className="text-[var(--muted-foreground)]">Loading...</span>
                   )}
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400 flex items-center gap-1.5"><Database className="w-3 h-3 text-purple-400"/> Apollo (Daily)</span>
+                  <span className="text-[var(--muted-foreground)] flex items-center gap-1.5"><Database className="w-3 h-3 text-[var(--primary)]"/> Apollo (Daily)</span>
                   {!apolloKey ? (
-                    <span className="text-purple-500/70 text-[10px] uppercase font-bold">Key Required</span>
+                    <span className="text-[var(--primary)]/70 text-[10px] uppercase font-bold">Key Required</span>
                   ) : globalUsage?.apollo ? (
-                    <span className="font-medium text-slate-200">{globalUsage.apollo.dailyConsumed} / {globalUsage.apollo.dailyLimit}</span>
+                    <span className="font-medium text-[var(--foreground)]">{globalUsage.apollo.dailyConsumed} / {globalUsage.apollo.dailyLimit}</span>
                   ) : (
-                    <span className="text-slate-600">Loading...</span>
+                    <span className="text-[var(--muted-foreground)]">Loading...</span>
                   )}
                 </div>
               </div>
@@ -136,10 +136,10 @@ export function UsageTracker({ localUsage, hunterKey, apolloKey }: UsageTrackerP
       {/* Toggle Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-4 py-3 bg-[#0a0a0b]/80 backdrop-blur-md border border-[#2a2a30] hover:border-indigo-500/50 hover:bg-[#111113] transition-all rounded-full shadow-lg shadow-black/50 group"
+        className="flex items-center gap-2 px-4 py-3 bg-[var(--background)]/80 backdrop-blur-md border border-[var(--border)] hover:border-[var(--primary)]/50 hover:bg-[var(--card)] transition-colors rounded-full group"
       >
-        <Zap className={`w-4 h-4 ${isOpen ? "text-indigo-400" : "text-emerald-400 group-hover:text-indigo-400 transition-colors"}`} />
-        <span className="text-xs font-bold text-white">API Tracker</span>
+        <Zap className={`w-4 h-4 ${isOpen ? "text-[var(--primary)]" : "text-[var(--primary)] group-hover:text-[var(--primary)] transition-colors"}`} />
+        <span className="text-xs font-bold text-[var(--foreground)]">API Tracker</span>
       </button>
 
     </div>

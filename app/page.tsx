@@ -43,9 +43,9 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen items-start justify-center bg-[#0f0f10] p-6">
-      <div className="w-full max-w-2xl rounded-lg bg-[#151517] p-8 shadow-xl">
-        <h1 className="mb-6 text-xl font-bold text-white">
+    <main className="flex min-h-screen items-start justify-center p-6">
+      <div className="w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--card)] p-8">
+        <h1 className="mb-6 text-xl font-bold text-[var(--foreground)]">
           Job Apply — Quick Form
         </h1>
 
@@ -85,7 +85,7 @@ export default function Home() {
           <div>
             <label
               htmlFor="jd"
-              className="mb-1 block text-sm font-semibold text-gray-300"
+              className="mb-1 block text-sm font-semibold text-[var(--foreground)]"
             >
               Job description (brief)
             </label>
@@ -94,7 +94,7 @@ export default function Home() {
               name="jd"
               rows={4}
               placeholder="Ownership of influencer product features, 3+ yrs..."
-              className="w-full rounded-md border border-[#303034] bg-[#0b0b0c] px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-none"
             />
           </div>
 
@@ -102,7 +102,7 @@ export default function Home() {
           <div>
             <label
               htmlFor="company_reason"
-              className="mb-1 block text-sm font-semibold text-gray-300"
+              className="mb-1 block text-sm font-semibold text-[var(--foreground)]"
             >
               Why this company? (optional — AI generates if blank)
             </label>
@@ -111,32 +111,32 @@ export default function Home() {
               name="company_reason"
               rows={2}
               placeholder="I love how Viral Pitch helps creators monetise..."
-              className="w-full rounded-md border border-[#303034] bg-[#0b0b0c] px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-none"
             />
           </div>
 
           {/* Status banner */}
           {status === "success" && (
-            <div className="rounded-md bg-green-900/40 p-3 text-sm text-green-300">
+            <div className="rounded-md bg-[var(--primary)]/10 p-3 text-sm text-[var(--primary)]">
               {message}
             </div>
           )}
           {status === "error" && (
-            <div className="rounded-md bg-red-900/40 p-3 text-sm text-red-300">
+            <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">
               {message}
             </div>
           )}
 
           {/* Hint */}
-          <p className="text-xs text-gray-500">
-            Submits to <code className="text-gray-400">/api/apply</code>. If
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Submits to <code className="text-[var(--muted-foreground)]">/api/apply</code>. If
             recipient email is provided, the search pipeline is skipped.
           </p>
 
           <button
             type="submit"
             disabled={status === "submitting"}
-            className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-md bg-[var(--primary)] px-5 py-2.5 text-sm font-medium text-[var(--primary-foreground)] transition hover:opacity-90 disabled:opacity-50"
           >
             {status === "submitting" ? "Processing..." : "Submit"}
           </button>
@@ -163,7 +163,7 @@ function Field({
     <div>
       <label
         htmlFor={id}
-        className="mb-1 block text-sm font-semibold text-gray-300"
+        className="mb-1 block text-sm font-semibold text-[var(--foreground)]"
       >
         {label}
       </label>
@@ -173,7 +173,7 @@ function Field({
         type={type}
         placeholder={placeholder}
         required={required}
-        className="w-full rounded-md border border-[#303034] bg-[#0b0b0c] px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-none"
       />
     </div>
   );

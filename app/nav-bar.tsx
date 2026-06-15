@@ -17,14 +17,14 @@ export function NavBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky top-0 z-50 bg-[#111113]/80 backdrop-blur-xl border-b border-[#1e1e22]">
+    <nav className="sticky top-0 z-50 bg-[var(--card)] backdrop-blur-xl border-b border-[var(--border)]">
       <div className="max-w-7xl mx-auto px-4 flex items-center h-12 gap-1">
         <Link
           href="/outreach"
           className="text-sm font-bold text-white tracking-tight mr-4 flex items-center gap-1.5"
         >
-          <div className="w-6 h-6 bg-indigo-600 rounded-md flex items-center justify-center">
-            <Zap className="w-3.5 h-3.5 text-white" />
+          <div className="w-6 h-6 bg-[var(--primary)] rounded-md flex items-center justify-center">
+            <Zap className="w-3.5 h-3.5 text-[var(--primary-foreground)]" />
           </div>
           <span className="hidden sm:inline">JobSuite</span>
         </Link>
@@ -42,8 +42,8 @@ export function NavBar() {
                 href={l.href}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-all ${
                   isActive
-                    ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/25"
-                    : "text-slate-500 hover:text-slate-300 hover:bg-[#1e1e22]"
+                    ? "bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/25"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--secondary)]"
                 }`}
               >
                 <l.icon className="w-3.5 h-3.5" />

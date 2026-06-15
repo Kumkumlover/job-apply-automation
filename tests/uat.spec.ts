@@ -118,22 +118,27 @@ test.describe('Job Apply Automation UAT', () => {
       console.log(" -> Finding Emails...");
       await page.getByRole('button', { name: /Find Emails for/i }).click();
       
-      // Wait for Emails phase to finish (Button will become "Generate Emails & Save")
+      // Wait for Emails phase to finish (Button will become "Generate Master Template")
       console.log(" -> Waiting for Emails to resolve...");
       await page.screenshot({ path: `debug_before_emails_${i}.png` });
       
       try {
-          await expect(page.getByRole('button', { name: /Generate Outreach for/i })).toBeVisible({ timeout: 180000 });
+          await expect(page.getByRole('button', { name: /Generate Master Template/i })).toBeVisible({ timeout: 180000 });
       } catch (e) {
           await page.screenshot({ path: `debug_timeout_emails_${i}.png` });
           throw e;
       }
       
-      // Click "Generate Outreach for X Contacts"
-      console.log(" -> Submitting to Draft Generator...");
-      await page.getByRole('button', { name: /Generate Outreach for/i }).click();
+      // Click "Generate Master Template"
+      console.log(" -> Generating Master Template...");
+      await page.getByRole('button', { name: /Generate Master Template/i }).click();
+
+      // Wait for Step 4 "Approve & Generate Drafts" button to appear
+      console.log(" -> Approving and Generating Drafts...");
+      await expect(page.getByRole('button', { name: /Approve & Generate/i })).toBeVisible({ timeout: 60000 });
+      await page.getByRole('button', { name: /Approve & Generate/i }).click();
       
-      // Wait for Step 4 "Review & Send" to load
+      // Wait for Step 5 "Review & Send" to load
       try {
         await expect(page.getByRole('button', { name: /Send Email/i }).first()).toBeVisible({ timeout: 180000 });
         console.log(" -> Review & Send loaded. Pushing to Drafts...");
